@@ -1,0 +1,47 @@
+name: Build VST3 - Tsengo Voice Synth
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  build-windows:
+    name: Build VST3 (Windows)
+    runs-on: windows-latest
+
+    steps:
+      # 1. Checkout code
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: false
+
+      # 2. Clone JUCE
+      - name: Clone JUCE
+        run: |
+          git clone --depth 1 --branch 7.0.9 https://github.com/juce-framework/JUCE.git JUCE
+
+      # 3. Configure CMake
+      - name: Configure CMake
+        run: |
+          cmake -B build -S . -DCMAKE_BUILD_TYPE=Release
+
+      # 4. Build
+      - name: Build
+        run: |
+          cmake --build build --config Release --parallel
+
+      # 5. Taona ny VST3 file
+      - name: Find VST3
+        run: |
+          dir build /s /b | findstr ".vst3"
+
+      # 6. Upload artifact
+      - name: Upload VST3
+        uses: actions/upload-artifact@v4
+        with:
+          name: TsengoVoiceSynth-VST3-Windows
+          path: |
+            build/**/*.vst3
+          if-no-files-found: warn
