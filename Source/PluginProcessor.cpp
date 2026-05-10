@@ -5,7 +5,7 @@ VoiceSynthProcessor::VoiceSynthProcessor()
     : AudioProcessor(BusesProperties()
         .withOutput("Output", juce::AudioChannelSet::stereo(), true))
 {
-    micBuffer.setSize(1, MIC_BUFFER_SIZE);
+    micBuffer.setSize(1, MIC_BUF);
     micBuffer.clear();
 }
 
@@ -15,21 +15,38 @@ VoiceSynthProcessor::~VoiceSynthProcessor()
     micDeviceManager.closeAudioDevice();
 }
 
-void VoiceSynthProcessor::prepareToPlay(double sampleRate, int samplesPerBlock)
+juce::StringArray VoiceSynthProcessor::getAvailableInputDevices()
 {
-    micBuffer.setSize(1, MIC_BUFFER_SIZE);
+    micDeviceManager.initialise(1, 0, nullptr, true);
+    auto* type = micDeviceManager.getCurrentDeviceTypeObject();
+    if (type) return type->getDeviceNames(true);
+    return {};
+}
+
+void VoiceSynthProcessor::openMicDevice(const juce::String& deviceName)
+{
+    micDeviceManager.initialise(1, 0, nullptr, true);
+    juce::AudioDeviceManager::AudioDeviceSetup setup;
+    micDeviceManager.getAudioDeviceSetup(setup);
+    setup.inputDeviceName  = deviceName;
+    setup.outputDeviceName = "";
+    setup.inputChannels    = 1;
+    setup.outputChannels   = 0;
+    setup.sampleRate       = sampleRate_;
+    micDeviceManager.setAudioDeviceSetup(setup, true);
+    micDeviceManager.addAudioCallback(this);
+    micInitialized = true;
+}
+
+void VoiceSynthProcessor::prepareToPlay(double sampleRate, int)
+{
+    sampleRate_ = sampleRate;
+    micBuffer.setSize(1, MIC_BUF);
     micBuffer.clear();
     micWritePos = 0;
-    currentMidiNote = -1;
-    currentPitchRatio = 1.0f;
-
-    // Sokafy mic mivantana (WASAPI) — indray mandeha monja
-    if (!micInitialized)
-    {
-        micDeviceManager.initialise(1, 0, nullptr, true);
-        micDeviceManager.addAudioCallback(this);
-        micInitialized = true;
-    }
+    oscPhase    = 0.0;
+    adsrState   = AState::IDLE;
+    adsrLevel   = 0.0f;
 }
 
 void VoiceSynthProcessor::releaseResources()
@@ -39,91 +56,114 @@ void VoiceSynthProcessor::releaseResources()
     micInitialized = false;
 }
 
-// === Mic avy WASAPI → Ring buffer ===
 void VoiceSynthProcessor::audioDeviceIOCallbackWithContext(
-    const float* const* inputChannelData, int numInputChannels,
-    float* const* /*outputChannelData*/,  int /*numOutputChannels*/,
+    const float* const* in, int numIn,
+    float* const*, int,
     int numSamples,
     const juce::AudioIODeviceCallbackContext&)
 {
-    if (numInputChannels < 1 || inputChannelData[0] == nullptr) return;
-
-    auto* writeBuf = micBuffer.getWritePointer(0);
-    int   writePos = micWritePos.load();
-    float level    = 0.0f;
-
+    if (numIn < 1 || in[0] == nullptr) return;
+    auto* buf = micBuffer.getWritePointer(0);
+    int   pos = micWritePos.load();
+    float lv  = 0.0f;
     for (int i = 0; i < numSamples; ++i)
     {
-        float s = inputChannelData[0][i];
-        writeBuf[writePos] = s;
-        writePos = (writePos + 1) % MIC_BUFFER_SIZE;
-        level = std::max(level, std::abs(s));
+        buf[pos] = in[0][i];
+        pos = (pos + 1) % MIC_BUF;
+        lv  = std::max(lv, std::abs(in[0][i]));
     }
+    micWritePos.store(pos);
+    inputLevel.store(lv);
+}
 
-    micWritePos.store(writePos);
-    inputLevel.store(level);
+float VoiceSynthProcessor::nextOscSample()
+{
+    float s = 0.0f;
+    switch (oscType)
+    {
+        case OscType::SINE:
+            s = std::sin(oscPhase); break;
+        case OscType::SAW:
+            s = (float)(oscPhase / juce::MathConstants<double>::pi - 1.0); break;
+        case OscType::SQUARE:
+            s = oscPhase < juce::MathConstants<double>::pi ? 1.0f : -1.0f; break;
+        case OscType::TRIANGLE:
+            s = (float)(2.0 * std::abs(2.0 * (oscPhase / juce::MathConstants<double>::twoPi) - 1.0) - 1.0); break;
+    }
+    oscPhase += juce::MathConstants<double>::twoPi
+              * midiToFreq(currentMidiNote.load()) / sampleRate_;
+    if (oscPhase >= juce::MathConstants<double>::twoPi)
+        oscPhase -= juce::MathConstants<double>::twoPi;
+    return s;
 }
 
 void VoiceSynthProcessor::processBlock(juce::AudioBuffer<float>& buffer,
-                                        juce::MidiBuffer& midiMessages)
+                                        juce::MidiBuffer& midi)
 {
-    juce::ScopedNoDenormals noDenormals;
-    const int numSamples  = buffer.getNumSamples();
-    const int numOutputCh = getTotalNumOutputChannels();
+    juce::ScopedNoDenormals nd;
+    const int N  = buffer.getNumSamples();
+    const int nO = getTotalNumOutputChannels();
 
-    // MIDI
-    for (const auto meta : midiMessages)
+    for (const auto m : midi)
     {
-        auto msg = meta.getMessage();
+        auto msg = m.getMessage();
         if (msg.isNoteOn())
         {
-            currentMidiNote.store(msg.getNoteNumber());
-            currentPitchRatio = midiNoteToFreq(msg.getNoteNumber())
-                              / midiNoteToFreq(BASE_NOTE);
+            int note = msg.getNoteNumber();
+            currentMidiNote.store(note);
+            pitchRatio = midiToFreq(note) / midiToFreq(BASE_NOTE);
+            adsrState  = AState::ATTACK;
         }
         else if (msg.isNoteOff() && msg.getNoteNumber() == currentMidiNote.load())
-            currentMidiNote.store(-1);
-    }
-
-    for (int ch = 0; ch < numOutputCh; ++ch)
-        buffer.clear(ch, 0, numSamples);
-
-    float outLevel = 0.0f;
-
-    if (currentMidiNote.load() >= 0)
-    {
-        auto* micData = micBuffer.getReadPointer(0);
-        auto* outL    = buffer.getWritePointer(0);
-        auto* outR    = numOutputCh > 1 ? buffer.getWritePointer(1) : nullptr;
-
-        float readHead = (float)((micWritePos.load() - numSamples
-                                  + MIC_BUFFER_SIZE) % MIC_BUFFER_SIZE);
-
-        for (int i = 0; i < numSamples; ++i)
         {
-            int   idx0   = (int)readHead % MIC_BUFFER_SIZE;
-            int   idx1   = (idx0 + 1) % MIC_BUFFER_SIZE;
-            float frac   = readHead - std::floor(readHead);
-            float sample = micData[idx0] * (1.0f - frac) + micData[idx1] * frac;
-
-            outL[i] = sample;
-            if (outR) outR[i] = sample;
-            outLevel = std::max(outLevel, std::abs(sample));
-
-            readHead += currentPitchRatio;
-            if (readHead >= MIC_BUFFER_SIZE) readHead -= MIC_BUFFER_SIZE;
+            adsrState = AState::RELEASE;
         }
     }
 
-    outputLevel.store(outLevel);
+    for (int ch = 0; ch < nO; ++ch) buffer.clear(ch, 0, N);
+
+    float outLv = 0.0f;
+    auto* outL  = buffer.getWritePointer(0);
+    auto* outR  = nO > 1 ? buffer.getWritePointer(1) : nullptr;
+
+    const float attackStep  = 1.0f / (float)(attack  * sampleRate_);
+    const float releaseStep = 1.0f / (float)(release * sampleRate_);
+
+    for (int i = 0; i < N; ++i)
+    {
+        // ADSR envelope
+        if      (adsrState == AState::ATTACK)  { adsrLevel += attackStep;  if (adsrLevel >= 1.0f) { adsrLevel = 1.0f; adsrState = AState::SUSTAIN; } }
+        else if (adsrState == AState::RELEASE) { adsrLevel -= releaseStep; if (adsrLevel <= 0.0f) { adsrLevel = 0.0f; adsrState = AState::IDLE; currentMidiNote.store(-1); } }
+        else if (adsrState == AState::IDLE)    { continue; }
+
+        float sample = 0.0f;
+
+        if (sourceMode == SourceMode::SYNTH)
+        {
+            sample = nextOscSample();
+        }
+        else // MIC
+        {
+            auto* mic = micBuffer.getReadPointer(0);
+            float rh  = (float)((micWritePos.load() - N + i * pitchRatio
+                                  + MIC_BUF * 4) % MIC_BUF);
+            int   i0  = (int)rh % MIC_BUF;
+            int   i1  = (i0 + 1) % MIC_BUF;
+            float fr  = rh - std::floor(rh);
+            sample    = mic[i0] * (1.0f - fr) + mic[i1] * fr;
+        }
+
+        sample *= adsrLevel * volume;
+        outL[i] = sample;
+        if (outR) outR[i] = sample;
+        outLv = std::max(outLv, std::abs(sample));
+    }
+
+    outputLevel.store(outLv);
 }
 
 juce::AudioProcessorEditor* VoiceSynthProcessor::createEditor()
-{
-    return new VoiceSynthEditor(*this);
-}
+{ return new VoiceSynthEditor(*this); }
 
 juce::AudioProcessor* JUCE_CALLTYPE createPluginFilter()
-{
-    return new VoiceSynthProcessor();
-}
+{ return new VoiceSynthProcessor(); }

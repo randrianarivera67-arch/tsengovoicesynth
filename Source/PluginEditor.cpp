@@ -1,148 +1,259 @@
 #include "PluginEditor.h"
 
-//==============================================================================
-VoiceSynthEditor::VoiceSynthEditor(VoiceSynthProcessor& p)
-    : AudioProcessorEditor(&p), processor(p)
+static void styleBtn(juce::TextButton& b, juce::Colour fg)
 {
-    setSize(400, 280);
-
-    // Title
-    titleLabel.setText("TSENGO VOICE SYNTH", juce::dontSendNotification);
-    titleLabel.setFont(juce::Font(22.0f, juce::Font::bold));
-    titleLabel.setColour(juce::Label::textColourId, juce::Colour(0xFF00E5FF));
-    titleLabel.setJustificationType(juce::Justification::centred);
-    addAndMakeVisible(titleLabel);
-
-    // Note courante
-    noteLabel.setText("Tsindrio Key...", juce::dontSendNotification);
-    noteLabel.setFont(juce::Font(18.0f));
-    noteLabel.setColour(juce::Label::textColourId, juce::Colours::white);
-    noteLabel.setJustificationType(juce::Justification::centred);
-    addAndMakeVisible(noteLabel);
-
-    // Level labels
-    inLevelLabel.setText("MIC: ---", juce::dontSendNotification);
-    inLevelLabel.setFont(juce::Font(13.0f));
-    inLevelLabel.setColour(juce::Label::textColourId, juce::Colours::lightgreen);
-    addAndMakeVisible(inLevelLabel);
-
-    outLevelLabel.setText("OUT: ---", juce::dontSendNotification);
-    outLevelLabel.setFont(juce::Font(13.0f));
-    outLevelLabel.setColour(juce::Label::textColourId, juce::Colour(0xFFFF9800));
-    addAndMakeVisible(outLevelLabel);
-
-    startTimerHz(30); // refresh 30fps
+    b.setColour(juce::TextButton::buttonColourId,   juce::Colour(0xFF1C2640));
+    b.setColour(juce::TextButton::buttonOnColourId, fg.withAlpha(0.25f));
+    b.setColour(juce::TextButton::textColourOffId,  fg.withAlpha(0.5f));
+    b.setColour(juce::TextButton::textColourOnId,   fg);
 }
 
-VoiceSynthEditor::~VoiceSynthEditor()
+static void styleKnob(juce::Slider& s, juce::Colour ac)
 {
-    stopTimer();
+    s.setColour(juce::Slider::rotarySliderFillColourId,   ac);
+    s.setColour(juce::Slider::rotarySliderOutlineColourId, ac.withAlpha(0.2f));
+    s.setColour(juce::Slider::thumbColourId,               ac);
+    s.setColour(juce::Slider::backgroundColourId,          juce::Colour(0xFF0B0F1A));
 }
 
-//==============================================================================
+VoiceSynthEditor::VoiceSynthEditor(VoiceSynthProcessor& proc)
+    : AudioProcessorEditor(&proc), p(proc)
+{
+    setSize(480, 420);
+
+    // Mode
+    styleBtn(btnSynth, accent()); btnSynth.setToggleable(true); btnSynth.setClickingTogglesState(false);
+    styleBtn(btnMic,   accent()); btnMic  .setToggleable(true); btnMic  .setClickingTogglesState(false);
+    btnSynth.setToggleState(true, juce::dontSendNotification);
+    btnSynth.onClick = [this]{ p.sourceMode = SourceMode::SYNTH; btnSynth.setToggleState(true,juce::dontSendNotification); btnMic.setToggleState(false,juce::dontSendNotification); };
+    btnMic  .onClick = [this]{ p.sourceMode = SourceMode::MIC;   btnMic  .setToggleState(true,juce::dontSendNotification); btnSynth.setToggleState(false,juce::dontSendNotification); refreshDeviceList(); };
+    addAndMakeVisible(btnSynth); addAndMakeVisible(btnMic);
+
+    // Osc
+    for (auto* b : { &btnSine, &btnSaw, &btnSq, &btnTri })
+    { styleBtn(*b, juce::Colour(0xFF7C4DFF)); b->setToggleable(true); b->setClickingTogglesState(false); addAndMakeVisible(*b); }
+    btnSine.setToggleState(true, juce::dontSendNotification);
+    btnSine.onClick = [this]{ p.oscType=OscType::SINE;     btnSine.setToggleState(true,juce::dontSendNotification); btnSaw.setToggleState(false,juce::dontSendNotification); btnSq.setToggleState(false,juce::dontSendNotification); btnTri.setToggleState(false,juce::dontSendNotification); };
+    btnSaw .onClick = [this]{ p.oscType=OscType::SAW;      btnSaw .setToggleState(true,juce::dontSendNotification); btnSine.setToggleState(false,juce::dontSendNotification); btnSq.setToggleState(false,juce::dontSendNotification); btnTri.setToggleState(false,juce::dontSendNotification); };
+    btnSq  .onClick = [this]{ p.oscType=OscType::SQUARE;   btnSq  .setToggleState(true,juce::dontSendNotification); btnSine.setToggleState(false,juce::dontSendNotification); btnSaw.setToggleState(false,juce::dontSendNotification); btnTri.setToggleState(false,juce::dontSendNotification); };
+    btnTri .onClick = [this]{ p.oscType=OscType::TRIANGLE; btnTri .setToggleState(true,juce::dontSendNotification); btnSine.setToggleState(false,juce::dontSendNotification); btnSaw.setToggleState(false,juce::dontSendNotification); btnSq.setToggleState(false,juce::dontSendNotification); };
+
+    // Device
+    lblDevice.setFont(juce::Font(10.0f)); lblDevice.setColour(juce::Label::textColourId, accent().withAlpha(0.6f));
+    cmbDevice.setColour(juce::ComboBox::backgroundColourId,    surface());
+    cmbDevice.setColour(juce::ComboBox::textColourId,          juce::Colours::white);
+    cmbDevice.setColour(juce::ComboBox::outlineColourId,       accent().withAlpha(0.3f));
+    cmbDevice.setColour(juce::ComboBox::arrowColourId,         accent());
+    cmbDevice.onChange = [this]{
+        auto name = cmbDevice.getText();
+        if (name.isNotEmpty()) p.openMicDevice(name);
+    };
+    styleBtn(btnRefresh, accent());
+    btnRefresh.onClick = [this]{ refreshDeviceList(); };
+    addAndMakeVisible(lblDevice); addAndMakeVisible(cmbDevice); addAndMakeVisible(btnRefresh);
+
+    // Knobs
+    sldVolume .setRange(0.0, 1.0, 0.01); sldVolume .setValue(0.8);  styleKnob(sldVolume,  accent());
+    sldAttack .setRange(0.001, 2.0, 0.001); sldAttack .setValue(0.02); styleKnob(sldAttack,  juce::Colour(0xFF00BFA5));
+    sldRelease.setRange(0.01, 4.0, 0.01);  sldRelease.setValue(0.4);  styleKnob(sldRelease, juce::Colour(0xFFFF6D00));
+    sldVolume .onValueChange = [this]{ p.volume  = (float)sldVolume .getValue(); };
+    sldAttack .onValueChange = [this]{ p.attack  = (float)sldAttack .getValue(); };
+    sldRelease.onValueChange = [this]{ p.release = (float)sldRelease.getValue(); };
+    addAndMakeVisible(sldVolume); addAndMakeVisible(sldAttack); addAndMakeVisible(sldRelease);
+
+    for (auto* [l, t] : { std::pair{&lblVol,"VOLUME"}, {&lblAtk,"ATTACK"}, {&lblRel,"RELEASE"} })
+    {
+        l->setText(t, juce::dontSendNotification);
+        l->setFont(juce::Font(9.0f, juce::Font::bold));
+        l->setColour(juce::Label::textColourId, juce::Colours::white.withAlpha(0.4f));
+        l->setJustificationType(juce::Justification::centred);
+        addAndMakeVisible(*l);
+    }
+
+    // Note display
+    lblNote.setFont(juce::Font(26.0f, juce::Font::bold));
+    lblNote.setColour(juce::Label::textColourId, accent());
+    lblNote.setJustificationType(juce::Justification::centred);
+    addAndMakeVisible(lblNote);
+
+    buildPiano();
+    startTimerHz(30);
+}
+
+VoiceSynthEditor::~VoiceSynthEditor() { stopTimer(); }
+
+void VoiceSynthEditor::refreshDeviceList()
+{
+    cmbDevice.clear();
+    auto devices = p.getAvailableInputDevices();
+    for (int i = 0; i < devices.size(); ++i)
+        cmbDevice.addItem(devices[i], i + 1);
+    if (cmbDevice.getNumItems() > 0) cmbDevice.setSelectedItemIndex(0);
+}
+
+void VoiceSynthEditor::buildPiano()
+{
+    keys.clear();
+    const bool blk[] = {0,1,0,1,0,0,1,0,1,0,1,0};
+    const int start = 48, end = 84;
+    float wx = 10.0f, ww = 22.0f, gap = 2.0f;
+    float whiteX = wx;
+    std::vector<std::pair<int,float>> whites;
+    for (int m = start; m <= end; ++m)
+        if (!blk[m%12]) { whites.push_back({m, whiteX}); whiteX += ww + gap; }
+    for (auto& [m, x] : whites) keys.push_back({m, false, x, ww, 52.0f});
+    for (int m = start; m <= end; ++m)
+    {
+        if (!blk[m%12]) continue;
+        for (int k = 0; k < (int)whites.size(); ++k)
+            if (whites[k].first == m - 1)
+            { keys.push_back({m, true, whites[k].second + ww*0.6f, ww*0.6f, 32.0f}); break; }
+    }
+}
+
 void VoiceSynthEditor::timerCallback()
 {
-    // Manavao level meters sy nota
-    displayInputLevel  = processor.getInputLevel();
-    displayOutputLevel = processor.getOutputLevel();
+    dispIn  += (p.inputLevel .load() - dispIn)  * 0.2f;
+    dispOut += (p.outputLevel.load() - dispOut) * 0.2f;
 
-    int note = processor.getCurrentNote();
+    int note = p.currentMidiNote.load();
     if (note >= 0)
     {
-        int octave = note / 12 - 1;
-        juce::String txt = juce::String(noteName(note)) + juce::String(octave)
-                         + "  (MIDI " + juce::String(note) + ")";
-        noteLabel.setText(txt, juce::dontSendNotification);
-        noteLabel.setColour(juce::Label::textColourId, juce::Colour(0xFF00E5FF));
+        static const char* names[] = {"C","C#","D","D#","E","F","F#","G","G#","A","A#","B"};
+        lblNote.setText(juce::String(names[note%12]) + juce::String(note/12-1), juce::dontSendNotification);
+        lblNote.setColour(juce::Label::textColourId, accent());
     }
     else
     {
-        noteLabel.setText("Tsindrio Key...", juce::dontSendNotification);
-        noteLabel.setColour(juce::Label::textColourId, juce::Colours::grey);
+        lblNote.setText("—", juce::dontSendNotification);
+        lblNote.setColour(juce::Label::textColourId, juce::Colours::grey);
     }
-
-    inLevelLabel.setText("MIC: " + juce::String(int(displayInputLevel * 100)) + "%",
-                         juce::dontSendNotification);
-    outLevelLabel.setText("OUT: " + juce::String(int(displayOutputLevel * 100)) + "%",
-                          juce::dontSendNotification);
-
     repaint();
 }
 
-//==============================================================================
 void VoiceSynthEditor::paint(juce::Graphics& g)
 {
-    // Background gradient
-    juce::ColourGradient bg(juce::Colour(0xFF0A0A1A), 0, 0,
-                            juce::Colour(0xFF0D2040), (float)getWidth(), (float)getHeight(),
-                            false);
-    g.setGradientFill(bg);
-    g.fillAll();
+    // Background
+    g.fillAll(bg());
 
-    // Border
-    g.setColour(juce::Colour(0xFF00E5FF).withAlpha(0.3f));
-    g.drawRoundedRectangle(getLocalBounds().toFloat().reduced(4), 10.0f, 1.5f);
+    // Header band
+    g.setColour(panel());
+    g.fillRect(0, 0, getWidth(), 44);
+    g.setColour(accent().withAlpha(0.15f));
+    g.fillRect(0, 43, getWidth(), 1);
 
-    // ---- MIC level bar ----
-    int barY   = 160;
-    int barX   = 30;
-    int barW   = 160;
-    int barH   = 18;
+    // Title
+    g.setFont(juce::Font("Courier New", 16.0f, juce::Font::bold));
+    g.setColour(accent());
+    g.drawText("TSENGO  VOICE  SYNTH", 0, 0, getWidth(), 44, juce::Justification::centred);
 
-    g.setColour(juce::Colours::darkgrey.darker());
-    g.fillRoundedRectangle((float)barX, (float)barY, (float)barW, (float)barH, 4.0f);
+    // Version dot
+    g.setColour(accent());
+    g.fillEllipse(14, 17, 8, 8);
+    g.setColour(accent().withAlpha(0.4f));
+    g.drawEllipse(12, 15, 12, 12, 1.0f);
 
-    g.setColour(juce::Colours::lightgreen);
-    g.fillRoundedRectangle((float)barX, (float)barY,
-                           (float)(barW * displayInputLevel), (float)barH, 4.0f);
+    // Section: Oscillator
+    g.setColour(surface());
+    g.fillRoundedRectangle(10, 54, 220, 54, 6);
+    g.setColour(accent().withAlpha(0.15f));
+    g.drawRoundedRectangle(10, 54, 220, 54, 6, 1.0f);
+    g.setFont(juce::Font(9.0f, juce::Font::bold));
+    g.setColour(juce::Colours::white.withAlpha(0.35f));
+    g.drawText("OSCILLATEUR", 20, 56, 100, 12, juce::Justification::left);
 
-    // ---- OUTPUT level bar ----
-    int bar2X = 210;
-    g.setColour(juce::Colours::darkgrey.darker());
-    g.fillRoundedRectangle((float)bar2X, (float)barY, (float)barW, (float)barH, 4.0f);
+    // Section: Mic device
+    g.setColour(surface());
+    g.fillRoundedRectangle(10, 116, 350, 50, 6);
+    g.setColour(accent().withAlpha(0.15f));
+    g.drawRoundedRectangle(10, 116, 350, 50, 6, 1.0f);
 
-    g.setColour(juce::Colour(0xFFFF9800));
-    g.fillRoundedRectangle((float)bar2X, (float)barY,
-                           (float)(barW * displayOutputLevel), (float)barH, 4.0f);
+    // Meters
+    int mx = 370, my = 54, mw = 16, mh = 112;
+    g.setColour(juce::Colour(0xFF0B1220));
+    g.fillRoundedRectangle((float)mx, (float)my, (float)mw, (float)mh, 4);
+    g.setColour(juce::Colour(0xFF0B1220));
+    g.fillRoundedRectangle((float)(mx+20), (float)my, (float)mw, (float)mh, 4);
 
-    // ---- Piano keys (déco) ----
-    int keyY  = 210;
-    int keyH  = 50;
-    int keyW  = 28;
-    int startX = 20;
-    int noteActive = processor.getCurrentNote();
+    // Mic meter (green)
+    float inH = dispIn * mh;
+    g.setColour(juce::Colour(0xFF00C853));
+    if (inH > 0) g.fillRoundedRectangle((float)mx, (float)(my + mh - inH), (float)mw, inH, 3);
 
-    // White keys: C D E F G A B
-    int whiteNotes[] = {60,62,64,65,67,69,71,72,74,76,77,79,81,83};
-    for (int k = 0; k < 14; ++k)
+    // Out meter (orange)
+    float outH = dispOut * mh;
+    g.setColour(juce::Colour(0xFFFF6D00));
+    if (outH > 0) g.fillRoundedRectangle((float)(mx+20), (float)(my + mh - outH), (float)mw, outH, 3);
+
+    g.setFont(juce::Font(8.0f));
+    g.setColour(juce::Colours::white.withAlpha(0.3f));
+    g.drawText("IN",  mx,    my+mh+2, mw,   10, juce::Justification::centred);
+    g.drawText("OUT", mx+20, my+mh+2, mw,   10, juce::Justification::centred);
+
+    // Note box
+    g.setColour(panel());
+    g.fillRoundedRectangle(238, 54, 120, 54, 6);
+    g.setColour(accent().withAlpha(0.2f));
+    g.drawRoundedRectangle(238, 54, 120, 54, 6, 1.0f);
+    g.setFont(juce::Font(9.0f));
+    g.setColour(juce::Colours::white.withAlpha(0.3f));
+    g.drawText("NOTA", 238, 56, 120, 12, juce::Justification::centred);
+
+    // Piano
+    int pianoY = getHeight() - 68;
+    g.setColour(juce::Colour(0xFF080C14));
+    g.fillRect(0, pianoY - 4, getWidth(), 72);
+    int activeNote = p.currentMidiNote.load();
+    for (auto& k : keys)
     {
-        bool active = (whiteNotes[k] == noteActive);
-        g.setColour(active ? juce::Colour(0xFF00E5FF) : juce::Colours::white);
-        g.fillRoundedRectangle((float)(startX + k * (keyW+2)), (float)keyY,
-                               (float)keyW, (float)keyH, 3.0f);
-        g.setColour(juce::Colours::black.withAlpha(0.4f));
-        g.drawRoundedRectangle((float)(startX + k * (keyW+2)), (float)keyY,
-                               (float)keyW, (float)keyH, 3.0f, 1.0f);
+        bool active = (k.midi == activeNote);
+        if (!k.black)
+        {
+            g.setColour(active ? accent() : juce::Colours::white.withAlpha(0.92f));
+            g.fillRoundedRectangle(k.x, (float)pianoY, k.w, k.h, 3);
+            g.setColour(juce::Colours::black.withAlpha(0.25f));
+            g.drawRoundedRectangle(k.x, (float)pianoY, k.w, k.h, 3, 0.8f);
+        }
     }
-
-    // Black keys: C# D# F# G# A#
-    int blackOffsets[] = {0,1,3,4,5, 7,8,10,11,12};
-    int blackNotes[]   = {61,63,66,68,70, 73,75,78,80,82};
-    for (int k = 0; k < 10; ++k)
+    for (auto& k : keys)
     {
-        bool active = (blackNotes[k] == noteActive);
-        int bx = startX + blackOffsets[k] * (keyW+2) + keyW/2;
-        g.setColour(active ? juce::Colour(0xFF0080FF) : juce::Colours::black);
-        g.fillRoundedRectangle((float)bx, (float)keyY,
-                               (float)(keyW * 0.65f), (float)(keyH * 0.6f), 2.0f);
+        bool active = (k.midi == activeNote);
+        if (k.black)
+        {
+            g.setColour(active ? juce::Colour(0xFF0050CC) : juce::Colour(0xFF111827));
+            g.fillRoundedRectangle(k.x, (float)pianoY, k.w, k.h, 2);
+            if (active) { g.setColour(accent().withAlpha(0.5f)); g.drawRoundedRectangle(k.x, (float)pianoY, k.w, k.h, 2, 1.0f); }
+        }
     }
 }
 
-//==============================================================================
 void VoiceSynthEditor::resized()
 {
-    titleLabel .setBounds(10,  10, getWidth()-20, 34);
-    noteLabel  .setBounds(10,  52, getWidth()-20, 30);
-    inLevelLabel .setBounds(30,  140, 160, 20);
-    outLevelLabel.setBounds(210, 140, 160, 20);
+    // Mode buttons
+    btnSynth.setBounds(10,  6,  70, 30);
+    btnMic  .setBounds(84,  6,  70, 30);
+
+    // Osc buttons
+    int ox = 20, oy = 70, ow = 44, oh = 24, og = 6;
+    btnSine.setBounds(ox,          oy, ow, oh);
+    btnSaw .setBounds(ox+ow+og,    oy, ow, oh);
+    btnSq  .setBounds(ox+(ow+og)*2,oy, ow, oh);
+    btnTri .setBounds(ox+(ow+og)*3,oy, ow, oh);
+
+    // Device
+    lblDevice .setBounds(18, 118, 160, 14);
+    cmbDevice .setBounds(18, 132, 300, 26);
+    btnRefresh.setBounds(322, 132, 30,  26);
+
+    // Knobs
+    int ky = 174, kw = 54;
+    sldVolume .setBounds(14,         ky, kw, kw);
+    sldAttack .setBounds(14+kw+8,    ky, kw, kw);
+    sldRelease.setBounds(14+(kw+8)*2,ky, kw, kw);
+    lblVol    .setBounds(14,          ky+kw,   kw, 14);
+    lblAtk    .setBounds(14+kw+8,     ky+kw,   kw, 14);
+    lblRel    .setBounds(14+(kw+8)*2, ky+kw,   kw, 14);
+
+    // Note
+    lblNote.setBounds(238, 68, 120, 36);
 }
