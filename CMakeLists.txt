@@ -10,7 +10,7 @@ juce_add_plugin(TsengoVoiceSynth
     PLUGIN_CODE Tvs1
     FORMATS VST3
     PRODUCT_NAME "Tsengo Voice Synth"
-    IS_SYNTH TRUE
+    IS_SYNTH FALSE
     NEEDS_MIDI_INPUT TRUE
     PLUGIN_MIDI_INPUT TRUE
     NEEDS_AUDIO_INPUT TRUE
