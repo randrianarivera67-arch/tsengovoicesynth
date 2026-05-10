@@ -28,6 +28,8 @@ target_compile_definitions(TsengoVoiceSynth PUBLIC
     JUCE_DISPLAY_SPLASH_SCREEN=0
 )
 
+juce_generate_juce_header(TsengoVoiceSynth)
+
 target_link_libraries(TsengoVoiceSynth PRIVATE
     juce::juce_audio_utils
     juce::juce_audio_processors
