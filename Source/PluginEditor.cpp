@@ -23,7 +23,7 @@ void CrystalPanel::paint (juce::Graphics& g)
     if (title_.isNotEmpty())
     {
         g.setColour (Colour (kCyan).withAlpha (0.35f));
-        g.setFont (juce::Font ("Courier New", 8.0f, juce::Font::plain);
+        g.setFont (juce::Font ("Courier New", 8.0f, juce::Font::plain));
         g.drawText (title_, 10, 6, getWidth() - 12, 10, juce::Justification::left);
     }
 }
@@ -74,7 +74,7 @@ void LevelMeter::paint (juce::Graphics& g)
     auto b = getLocalBounds().toFloat();
     // Label at top
     g.setColour (Colour (kCyan).withAlpha (0.3f));
-    g.setFont (juce::Font ("Courier New", 8.0f, juce::Font::plain);
+    g.setFont (juce::Font ("Courier New", 8.0f, juce::Font::plain));
     g.drawText (label_, 0, 0, getWidth(), 14, juce::Justification::centred);
 
     auto track = b.withTrimmedTop (16.0f);
@@ -139,7 +139,7 @@ void PianoStrip::paint (juce::Graphics& g)
         if (k.midi % 12 == 0)
         {
             g.setColour (a ? Colour (kBg) : Colour (0xFF888888));
-            g.setFont (juce::Font ("Courier New", 7.0f, juce::Font::plain);
+            g.setFont (juce::Font ("Courier New", 7.0f, juce::Font::plain));
             g.drawText ("C" + juce::String (k.midi / 12 - 1),
                         (int)k.x, (int)k.h - 12, (int)k.w, 10,
                         juce::Justification::centred);
@@ -182,13 +182,13 @@ TsengoVoiceSynthEditor::TsengoVoiceSynthEditor (TsengoVoiceSynthProcessor& p)
     // ── Title bar ─────────────────────────────────────────────────────────
     titleLabel_.setText ("TSENGO  VOICE  SYNTH", juce::dontSendNotification);
     titleLabel_.setColour (juce::Label::textColourId, Colour (kCyan));
-    titleLabel_.setFont (juce::Font ("Courier New", 13.0f, juce::Font::plain);
+    titleLabel_.setFont (juce::Font ("Courier New", 13.0f, juce::Font::plain));
     addAndMakeVisible (titleLabel_);
 
     versionLabel_.setText ("MIC \xe2\x86\x92 MIDI  \xc2\xb7  Channel Rack  \xc2\xb7  v2.1",
                            juce::dontSendNotification);
     versionLabel_.setColour (juce::Label::textColourId, Colour (kCyan).withAlpha (0.3f));
-    versionLabel_.setFont (juce::Font ("Courier New", 8.0f, juce::Font::plain);
+    versionLabel_.setFont (juce::Font ("Courier New", 8.0f, juce::Font::plain));
     versionLabel_.setJustificationType (juce::Justification::right);
     addAndMakeVisible (versionLabel_);
 
@@ -198,7 +198,7 @@ TsengoVoiceSynthEditor::TsengoVoiceSynthEditor (TsengoVoiceSynthProcessor& p)
     scStatusLabel_.setColour (juce::Label::textColourId, Colour (kOrange));
     scStatusLabel_.setColour (juce::Label::backgroundColourId,
                               Colour (kOrange).withAlpha (0.1f));
-    scStatusLabel_.setFont (juce::Font ("Courier New", 8.5f, juce::Font::plain);
+    scStatusLabel_.setFont (juce::Font ("Courier New", 8.5f, juce::Font::plain));
     scStatusLabel_.setJustificationType (juce::Justification::centred);
     addAndMakeVisible (scStatusLabel_);
 
@@ -210,17 +210,17 @@ TsengoVoiceSynthEditor::TsengoVoiceSynthEditor (TsengoVoiceSynthProcessor& p)
 
     addAndMakeVisible (waveform_);
 
-    statusLabel_.setFont (juce::Font ("Courier New", 8.0f, juce::Font::plain);
+    statusLabel_.setFont (juce::Font ("Courier New", 8.0f, juce::Font::plain));
     addAndMakeVisible (statusLabel_);
 
     noteLabel_.setColour (juce::Label::textColourId, Colour (kCyan));
-    noteLabel_.setFont (juce::Font ("Courier New", 32.0f, juce::Font::plain);
+    noteLabel_.setFont (juce::Font ("Courier New", 32.0f, juce::Font::plain));
     noteLabel_.setJustificationType (juce::Justification::centred);
     noteLabel_.setText ("--", juce::dontSendNotification);
     addAndMakeVisible (noteLabel_);
 
     freqLabel_.setColour (juce::Label::textColourId, Colour (kCyan).withAlpha (0.5f));
-    freqLabel_.setFont (juce::Font ("Courier New", 9.0f, juce::Font::plain);
+    freqLabel_.setFont (juce::Font ("Courier New", 9.0f, juce::Font::plain));
     freqLabel_.setJustificationType (juce::Justification::centred);
     freqLabel_.setText ("-- Hz", juce::dontSendNotification);
     addAndMakeVisible (freqLabel_);
@@ -229,7 +229,7 @@ TsengoVoiceSynthEditor::TsengoVoiceSynthEditor (TsengoVoiceSynthProcessor& p)
     addAndMakeVisible (confTitleLabel_);
 
     confValLabel_.setColour (juce::Label::textColourId, Colour (kCyan).withAlpha (0.6f));
-    confValLabel_.setFont (juce::Font ("Courier New", 8.0f, juce::Font::plain);
+    confValLabel_.setFont (juce::Font ("Courier New", 8.0f, juce::Font::plain));
     confValLabel_.setJustificationType (juce::Justification::right);
     confValLabel_.setText ("0%", juce::dontSendNotification);
     addAndMakeVisible (confValLabel_);
@@ -259,19 +259,19 @@ TsengoVoiceSynthEditor::TsengoVoiceSynthEditor (TsengoVoiceSynthProcessor& p)
     addAndMakeVisible (rightPanel_);
 
     midiNoteLabel_.setColour (juce::Label::textColourId, Colour (kCyan));
-    midiNoteLabel_.setFont (juce::Font ("Courier New", 22.0f, juce::Font::plain);
+    midiNoteLabel_.setFont (juce::Font ("Courier New", 22.0f, juce::Font::plain));
     midiNoteLabel_.setJustificationType (juce::Justification::centred);
     midiNoteLabel_.setText ("--", juce::dontSendNotification);
     addAndMakeVisible (midiNoteLabel_);
 
     midiNumLabel_.setColour (juce::Label::textColourId, Colour (kCyan).withAlpha (0.35f));
-    midiNumLabel_.setFont (juce::Font ("Courier New", 8.0f, juce::Font::plain);
+    midiNumLabel_.setFont (juce::Font ("Courier New", 8.0f, juce::Font::plain));
     midiNumLabel_.setJustificationType (juce::Justification::centred);
     midiNumLabel_.setText ("MIDI CH 1", juce::dontSendNotification);
     addAndMakeVisible (midiNumLabel_);
 
     midiChLabel_.setColour (juce::Label::textColourId, Colour (kCyan).withAlpha (0.4f));
-    midiChLabel_.setFont (juce::Font ("Courier New", 8.0f, juce::Font::plain);
+    midiChLabel_.setFont (juce::Font ("Courier New", 8.0f, juce::Font::plain));
     midiChLabel_.setJustificationType (juce::Justification::centred);
     addAndMakeVisible (midiChLabel_);
 
