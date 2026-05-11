@@ -22,7 +22,7 @@ public:
 
     juce::AudioProcessorEditor* createEditor() override;
     bool   hasEditor()      const override { return true; }
-    juce::String getName()  const override { return "Tsengo Voice Synth"; }
+    const juce::String getName() const override { return pluginName_; }
     bool   acceptsMidi()    const override { return true; }
     bool   producesMidi()   const override { return true; }
     bool   isMidiEffect()   const override { return false; }
@@ -31,7 +31,7 @@ public:
     int  getNumPrograms()    override { return 1; }
     int  getCurrentProgram() override { return 0; }
     void setCurrentProgram (int) override {}
-    const juce::String getProgramName (int) override { return "Default"; }
+    const juce::String getProgramName (int) override { return defaultPreset_; }
     void changeProgramName (int, const juce::String&) override {}
 
     void getStateInformation (juce::MemoryBlock&) override;
@@ -76,5 +76,7 @@ private:
     int  attackSamples()  const noexcept;
     int  releaseSamples() const noexcept;
 
+    const juce::String pluginName_ { "Tsengo Voice Synth" };
+    const juce::String defaultPreset_ { "Default" };
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (TsengoVoiceSynthProcessor)
 };
