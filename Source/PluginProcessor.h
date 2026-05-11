@@ -1,86 +1,96 @@
 #pragma once
 #include <JuceHeader.h>
+#include "YinPitchDetector.h"
 
-enum class SourceMode { SYNTH, MIC };
-enum class OscType    { SINE, SAW, SQUARE, TRIANGLE };
-
-class VoiceSynthProcessor : public juce::AudioProcessor,
-                             private juce::AudioIODeviceCallback
+/**
+ * TsengoVoiceSynth — PluginProcessor
+ *
+ * Audio pipeline:
+ *   Mic input → ring buffer → YIN pitch detection (background thread) →
+ *   MIDI noteOn/noteOff output → DAW piano roll
+ *
+ * Parameters exposed (APVTS):
+ *   "threshold"  — YIN confidence threshold (0.05 – 0.50)
+ *   "volume"     — output level (0 – 1)
+ *   "attack"     — note debounce attack ms (5 – 200)
+ *   "release"    — note hold time ms (50 – 2000)
+ *   "mincents"   — pitch deviation tolerance in cents (5 – 50)
+ */
+class TsengoVoiceSynthProcessor : public juce::AudioProcessor
 {
 public:
-    VoiceSynthProcessor();
-    ~VoiceSynthProcessor() override;
+    TsengoVoiceSynthProcessor();
+    ~TsengoVoiceSynthProcessor() override;
 
-    void prepareToPlay(double sampleRate, int samplesPerBlock) override;
+    // ── AudioProcessor ────────────────────────────────────────────────────
+    void prepareToPlay (double sampleRate, int samplesPerBlock) override;
     void releaseResources() override;
-    void processBlock(juce::AudioBuffer<float>&, juce::MidiBuffer&) override;
+    void processBlock (juce::AudioBuffer<float>&, juce::MidiBuffer&) override;
+
+    bool isBusesLayoutSupported (const BusesLayout&) const override;
 
     juce::AudioProcessorEditor* createEditor() override;
     bool hasEditor() const override { return true; }
 
     const juce::String getName() const override { return "Tsengo Voice Synth"; }
-    bool acceptsMidi() const override  { return true; }
-    bool producesMidi() const override { return false; }
-    bool isMidiEffect() const override { return false; }
-    double getTailLengthSeconds() const override { return 0.5; }
+    bool   acceptsMidi()  const override { return false; }
+    bool   producesMidi() const override { return true; }
+    bool   isMidiEffect() const override { return false; }
+    double getTailLengthSeconds() const override { return 0.0; }
 
-    int getNumPrograms() override    { return 1; }
-    int getCurrentProgram() override { return 0; }
-    void setCurrentProgram(int) override {}
-    const juce::String getProgramName(int) override { return "Default"; }
-    void changeProgramName(int, const juce::String&) override {}
-    void getStateInformation(juce::MemoryBlock&) override {}
-    void setStateInformation(const void*, int) override {}
+    int  getNumPrograms()    override { return 1; }
+    int  getCurrentProgram() override { return 0; }
+    void setCurrentProgram (int) override {}
+    const juce::String getProgramName (int) override { return "Default"; }
+    void changeProgramName (int, const juce::String&) override {}
 
-    // === State public (editor manavao azy) ===
-    std::atomic<float> inputLevel  { 0.0f };
-    std::atomic<float> outputLevel { 0.0f };
-    std::atomic<int>   currentMidiNote { -1 };
+    void getStateInformation (juce::MemoryBlock&) override;
+    void setStateInformation (const void*, int) override;
 
-    SourceMode sourceMode { SourceMode::SYNTH };
-    OscType    oscType    { OscType::SINE };
-    float      volume     { 0.8f };
-    float      attack     { 0.02f };
-    float      release    { 0.4f };
+    // ── Public state (read by editor on message thread) ───────────────────
+    struct DetectionState
+    {
+        float frequency   { 0.0f };
+        float confidence  { 0.0f };
+        int   midiNote    { -1 };
+        float midiCents   { 0.0f };
+        float inputLevel  { 0.0f };
+    };
+    DetectionState getDetectionState() const noexcept;
 
-    // === Mic device management ===
-    juce::StringArray getAvailableInputDevices();
-    void openMicDevice(const juce::String& deviceName);
-    juce::AudioDeviceManager& getMicDeviceManager() { return micDeviceManager; }
+    // ── Parameter layout ──────────────────────────────────────────────────
+    juce::AudioProcessorValueTreeState apvts;
+    static juce::AudioProcessorValueTreeState::ParameterLayout createParameterLayout();
 
 private:
-    void audioDeviceIOCallbackWithContext(
-        const float* const* in, int numIn,
-        float* const* out,     int numOut,
-        int numSamples,
-        const juce::AudioIODeviceCallbackContext&) override;
-    void audioDeviceAboutToStart(juce::AudioIODevice*) override {}
-    void audioDeviceStopped() override {}
+    // ── Parameters ────────────────────────────────────────────────────────
+    std::atomic<float>* pThreshold { nullptr };
+    std::atomic<float>* pVolume    { nullptr };
+    std::atomic<float>* pAttack    { nullptr };
+    std::atomic<float>* pRelease   { nullptr };
+    std::atomic<float>* pMinCents  { nullptr };
 
-    juce::AudioDeviceManager micDeviceManager;
-    bool micInitialized = false;
+    // ── YIN ───────────────────────────────────────────────────────────────
+    YinPitchDetector yin_;
+    static constexpr int kYinBuf { 2048 };
 
-    static constexpr int MIC_BUF = 176400;
-    juce::AudioBuffer<float> micBuffer;
-    std::atomic<int> micWritePos { 0 };
+    // ── MIDI state ────────────────────────────────────────────────────────
+    int   currentNote_       { -1 };
+    int   candidateNote_     { -1 };
+    int   candidateCount_    { 0 };
+    int   attackSamples_     { 0 };
+    int   releaseSamples_    { 0 };
+    int   releaseCounter_    { 0 };
 
-    // Oscillator
-    double oscPhase    = 0.0;
-    double sampleRate_ = 44100.0;
+    // ── Level metering (shared with editor) ───────────────────────────────
+    mutable juce::SpinLock stateLock_;
+    DetectionState         sharedState_;
 
-    // ADSR
-    enum class AState { IDLE, ATTACK, SUSTAIN, RELEASE };
-    AState adsrState = AState::IDLE;
-    float  adsrLevel = 0.0f;
+    // ── Helpers ───────────────────────────────────────────────────────────
+    void emitNoteOn  (int note, juce::MidiBuffer&, int sampleOffset);
+    void emitNoteOff (int note, juce::MidiBuffer&, int sampleOffset);
+    int  attackThresh()  const noexcept;
+    int  releaseThresh() const noexcept;
 
-    // MIDI / pitch
-    float pitchRatio = 1.0f;
-    static constexpr int BASE_NOTE = 60;
-
-    static float midiToFreq(int n)
-    { return 440.0f * std::pow(2.0f, (n - 69) / 12.0f); }
-
-    float nextOscSample();
-
-    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(VoiceSynthProcessor)
+    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (TsengoVoiceSynthProcessor)
 };

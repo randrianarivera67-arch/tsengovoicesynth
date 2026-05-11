@@ -1,0 +1,18 @@
+build/
+.vs/
+*.user
+*.suo
+*.opensdf
+*.sdf
+.DS_Store
+Thumbs.db
+*.aps
+
+# JUCE
+JUCE/
+
+# IDE
+.vscode/
+.idea/
+*.xcuserstate
+*.xcworkspace/xcuserdata
