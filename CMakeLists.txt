@@ -66,5 +66,4 @@ target_link_libraries(TsengoVoiceSynth PRIVATE
     juce::juce_graphics
     juce::juce_gui_basics
     juce::juce_gui_extra
-    juce::recommended_warning_flags
 )
