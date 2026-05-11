@@ -78,7 +78,7 @@ void WaveformDisplay::paint (Graphics& g)
 // ═════════════════════════════════════════════════════════════════════════════
 // LevelMeter
 // ═════════════════════════════════════════════════════════════════════════════
-LevelMeter::LevelMeter (Colour c, const String& label)
+LevelMeter::LevelMeter (LevelMeter::MeterColor c, const String& label)
     : meterColour_ (c), label_ (label) {}
 
 void LevelMeter::paint (Graphics& g)
@@ -97,7 +97,7 @@ void LevelMeter::paint (Graphics& g)
     // Fill
     const float fillH = track.getHeight() * value_;
     auto fill = track.removeFromBottom (fillH);
-    const juce::Colour col = meterColour_ == LevelMeter::Colour::Green
+    const juce::Colour col = meterColour_ == LevelMeter::MeterColor::Green
                              ? juce::Colour (kGreen) : juce::Colour (kOrange);
     g.setColour (col.withAlpha (0.85f));
     g.fillRoundedRectangle (fill, 2.0f);

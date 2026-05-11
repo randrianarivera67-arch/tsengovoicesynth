@@ -38,13 +38,13 @@ private:
 class LevelMeter : public juce::Component
 {
 public:
-    enum class Colour { Green, Orange };
-    LevelMeter (Colour c, const juce::String& label);
+    enum class MeterColor { Green, Orange };
+    LevelMeter (MeterColor c, const juce::String& label);
     void setValue (float v) noexcept { value_ = juce::jlimit (0.0f, 1.0f, v); }
     void paint (juce::Graphics&) override;
 
 private:
-    Colour meterColour_;
+    MeterColor meterColour_;
     juce::String label_;
     float value_ { 0.0f };
 };
@@ -112,8 +112,8 @@ private:
     juce::Label     midiNoteLabel_, midiNumLabel_, midiChLabel_;
 
     // ── Meters ────────────────────────────────────────────────────────────
-    LevelMeter inMeter_  { LevelMeter::Colour::Green,  "IN" };
-    LevelMeter outMeter_ { LevelMeter::Colour::Orange, "OUT" };
+    LevelMeter inMeter_  { LevelMeter::MeterColor::Green,  "IN" };
+    LevelMeter outMeter_ { LevelMeter::MeterColor::Orange, "OUT" };
 
     // ── Piano ─────────────────────────────────────────────────────────────
     PianoStrip piano_;
