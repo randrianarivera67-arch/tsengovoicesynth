@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.22)
-project(TsengoVoiceSynth VERSION 2.0.0)
+project(TsengoVoiceSynth VERSION 2.1.0)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -15,18 +15,20 @@ FetchContent_Declare(
 FetchContent_MakeAvailable(JUCE)
 
 # ── Plugin target ─────────────────────────────────────────────────────────────
+# IS_SYNTH TRUE  → appears in FL Studio Channel Rack (not the Mixer)
+# NEEDS_MIDI_OUTPUT TRUE → sends notes directly to the piano roll
 juce_add_plugin(TsengoVoiceSynth
     COMPANY_NAME                "Tsengo"
     PLUGIN_MANUFACTURER_CODE    "Tsnk"
-    PLUGIN_CODE                 "Tvs1"
+    PLUGIN_CODE                 "Tvs2"
     FORMATS                     VST3 Standalone
     PRODUCT_NAME                "Tsengo Voice Synth"
-    IS_SYNTH                    FALSE
-    NEEDS_MIDI_INPUT            FALSE
+    IS_SYNTH                    TRUE
+    NEEDS_MIDI_INPUT            TRUE
     NEEDS_MIDI_OUTPUT           TRUE
     IS_MIDI_EFFECT              FALSE
     EDITOR_WANTS_KEYBOARD_FOCUS FALSE
-    VST3_CATEGORIES             "Fx" "Tools"
+    VST3_CATEGORIES             "Instrument" "Tools"
     COPY_PLUGIN_AFTER_BUILD     FALSE
 )
 
@@ -50,7 +52,6 @@ target_compile_definitions(TsengoVoiceSynth PUBLIC
 )
 
 # ── JUCE modules ──────────────────────────────────────────────────────────────
-# NOTE: juce::recommended_warning_flags removed in JUCE 7 — do NOT include it.
 target_link_libraries(TsengoVoiceSynth PRIVATE
     juce::juce_audio_basics
     juce::juce_audio_devices
