@@ -108,8 +108,8 @@ void TsengoVoiceSynthProcessor::processBlock (juce::AudioBuffer<float>& buffer,
     midiMessages.clear();   // we produce MIDI, not consume it
 
     const int  totalSamples = buffer.getNumSamples();
-    const int  numInputCh   = buffer.getNumInputChannels();
-    const int  numOutputCh  = buffer.getNumOutputChannels();
+    const int  numInputCh   = getTotalNumInputChannels();
+    const int  numOutputCh  = getTotalNumOutputChannels();
 
     // ── Level meter ───────────────────────────────────────────────────────
     float inputPeak = 0.0f;
