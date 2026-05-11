@@ -84,7 +84,7 @@ LevelMeter::LevelMeter (Colour c, const String& label)
 void LevelMeter::paint (Graphics& g)
 {
     auto b = getLocalBounds().toFloat();
-    const auto track = b.removeFromBottom (b.getHeight() - 14.0f);
+    auto track = b.removeFromBottom (b.getHeight() - 14.0f);
     // Label
     g.setColour (Colour (kCyan).withAlpha (0.3f));
     g.setFont (juce::Font ("Courier New", 8.0f, juce::Font::plain));
