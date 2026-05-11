@@ -28,8 +28,7 @@ void CrystalPanel::paint (Graphics& g)
     if (title_.isNotEmpty())
     {
         g.setColour (Colour (kCyan).withAlpha (0.35f));
-        g.setFont (juce::Font (juce::FontOptions()
-                       .withName ("Courier New").withHeight (8.0f)));
+        g.setFont (juce::Font ("Courier New", 8.0f, juce::Font::plain));
         g.drawText (title_, 10, 6, getWidth() - 12, 10,
                     juce::Justification::left);
     }
@@ -88,7 +87,7 @@ void LevelMeter::paint (Graphics& g)
     const auto track = b.removeFromBottom (b.getHeight() - 14.0f);
     // Label
     g.setColour (Colour (kCyan).withAlpha (0.3f));
-    g.setFont (juce::Font (juce::FontOptions().withName("Courier New").withHeight(8.0f)));
+    g.setFont (juce::Font ("Courier New", 8.0f, juce::Font::plain));
     g.drawText (label_, b.toNearestInt(), juce::Justification::centred);
 
     // Track bg
@@ -162,7 +161,7 @@ void PianoStrip::paint (Graphics& g)
         if (k.midi % 12 == 0)
         {
             g.setColour (active ? Colour (kBg) : Colour (0xFF888888));
-            g.setFont (juce::Font (juce::FontOptions().withName("Courier New").withHeight(7.0f)));
+            g.setFont (juce::Font ("Courier New", 7.0f, juce::Font::plain));
             g.drawText ("C" + String (k.midi / 12 - 1),
                         (int)k.x, (int)k.h - 12, (int)k.w, 10,
                         juce::Justification::centred);
@@ -209,15 +208,13 @@ TsengoVoiceSynthEditor::TsengoVoiceSynthEditor (TsengoVoiceSynthProcessor& p)
     // ── Header labels ──────────────────────────────────────────────────────
     titleLabel_.setText ("TSENGO  VOICE  SYNTH", juce::dontSendNotification);
     titleLabel_.setColour (juce::Label::textColourId, Colour (kCyan));
-    titleLabel_.setFont (juce::Font (juce::FontOptions()
-                    .withName ("Courier New").withHeight (13.0f)).boldened());
+    titleLabel_.setFont (juce::Font ("Courier New", 13.0f, juce::Font::plain).boldened());
     addAndMakeVisible (titleLabel_);
 
     versionLabel_.setText ("MIC \xe2\x86\x92 MIDI  \xc2\xb7  VST3  \xc2\xb7  v2.0",
                            juce::dontSendNotification);
     versionLabel_.setColour (juce::Label::textColourId, Colour (kCyan).withAlpha (0.3f));
-    versionLabel_.setFont (juce::Font (juce::FontOptions()
-                    .withName ("Courier New").withHeight (8.0f)));
+    versionLabel_.setFont (juce::Font ("Courier New", 8.0f, juce::Font::plain));
     versionLabel_.setJustificationType (juce::Justification::right);
     addAndMakeVisible (versionLabel_);
 
@@ -238,21 +235,18 @@ TsengoVoiceSynthEditor::TsengoVoiceSynthEditor (TsengoVoiceSynthProcessor& p)
 
     statusLabel_.setText ("\xe2\x97\x89  ÉCOUTE ACTIVE", juce::dontSendNotification);
     statusLabel_.setColour (juce::Label::textColourId, Colour (kGreen).withAlpha (0.8f));
-    statusLabel_.setFont (juce::Font (juce::FontOptions()
-                    .withName ("Courier New").withHeight (8.0f)));
+    statusLabel_.setFont (juce::Font ("Courier New", 8.0f, juce::Font::plain));
     addAndMakeVisible (statusLabel_);
 
     noteLabel_.setText ("—", juce::dontSendNotification);
     noteLabel_.setColour (juce::Label::textColourId, Colour (kCyan));
-    noteLabel_.setFont (juce::Font (juce::FontOptions()
-                    .withName ("Courier New").withHeight (30.0f)).boldened());
+    noteLabel_.setFont (juce::Font ("Courier New", 30.0f, juce::Font::plain).boldened());
     noteLabel_.setJustificationType (juce::Justification::centred);
     addAndMakeVisible (noteLabel_);
 
     freqLabel_.setText ("— Hz", juce::dontSendNotification);
     freqLabel_.setColour (juce::Label::textColourId, Colour (kCyan).withAlpha (0.5f));
-    freqLabel_.setFont (juce::Font (juce::FontOptions()
-                    .withName ("Courier New").withHeight (9.0f)));
+    freqLabel_.setFont (juce::Font ("Courier New", 9.0f, juce::Font::plain));
     freqLabel_.setJustificationType (juce::Justification::centred);
     addAndMakeVisible (freqLabel_);
 
@@ -261,8 +255,7 @@ TsengoVoiceSynthEditor::TsengoVoiceSynthEditor (TsengoVoiceSynthProcessor& p)
 
     confValLabel_.setText ("0%", juce::dontSendNotification);
     confValLabel_.setColour (juce::Label::textColourId, Colour (kCyan).withAlpha (0.6f));
-    confValLabel_.setFont (juce::Font (juce::FontOptions()
-                    .withName ("Courier New").withHeight (8.0f)));
+    confValLabel_.setFont (juce::Font ("Courier New", 8.0f, juce::Font::plain));
     confValLabel_.setJustificationType (juce::Justification::right);
     addAndMakeVisible (confValLabel_);
 
@@ -293,15 +286,13 @@ TsengoVoiceSynthEditor::TsengoVoiceSynthEditor (TsengoVoiceSynthProcessor& p)
 
     midiNoteLabel_.setText ("—", juce::dontSendNotification);
     midiNoteLabel_.setColour (juce::Label::textColourId, Colour (kCyan));
-    midiNoteLabel_.setFont (juce::Font (juce::FontOptions()
-                    .withName ("Courier New").withHeight (20.0f)).boldened());
+    midiNoteLabel_.setFont (juce::Font ("Courier New", 20.0f, juce::Font::plain).boldened());
     midiNoteLabel_.setJustificationType (juce::Justification::centred);
     addAndMakeVisible (midiNoteLabel_);
 
     midiNumLabel_.setText ("MIDI CH 1", juce::dontSendNotification);
     midiNumLabel_.setColour (juce::Label::textColourId, Colour (kCyan).withAlpha (0.35f));
-    midiNumLabel_.setFont (juce::Font (juce::FontOptions()
-                    .withName ("Courier New").withHeight (8.0f)));
+    midiNumLabel_.setFont (juce::Font ("Courier New", 8.0f, juce::Font::plain));
     midiNumLabel_.setJustificationType (juce::Justification::centred);
     addAndMakeVisible (midiNumLabel_);
 
@@ -418,8 +409,8 @@ void TsengoVoiceSynthEditor::paint (Graphics& g)
     g.fillEllipse (8.0f, 18.0f, 7.0f, 7.0f);
 
     // Confidence bar (manual, inside left panel area)
-    const auto* det = &proc_.getDetectionState();
-    const float conf = det->confidence;
+    const auto det = proc_.getDetectionState();
+    const float conf = det.confidence;
     const auto leftBounds = leftPanel_.getBounds();
     const int barY = leftBounds.getBottom() - 20;
     const int barX = leftBounds.getX() + 16;

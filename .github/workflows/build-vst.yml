@@ -10,14 +10,12 @@ on:
 jobs:
   build-windows:
     name: Windows (MSVC)
-    runs-on: windows-latest
+    runs-on: windows-2025
     steps:
       - uses: actions/checkout@v4
 
       - name: Configure CMake
-        run: |
-          cmake -B build -S . -G "Visual Studio 17 2022" -A x64 ^
-            -DCMAKE_BUILD_TYPE=Release
+        run: cmake -B build -S . -G "Visual Studio 17 2022" -A x64 -DCMAKE_BUILD_TYPE=Release
         shell: cmd
 
       - name: Build
@@ -27,7 +25,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: TsengoVoiceSynth-VST3-Windows
-          path: build/TsengoVoiceSynth_artefacts/Release/VST3/**/*.vst3
+          path: build/TsengoVoiceSynth_artefacts/Release/VST3/
           if-no-files-found: error
 
   build-macos:
@@ -49,7 +47,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: TsengoVoiceSynth-VST3-macOS
-          path: build/TsengoVoiceSynth_artefacts/Release/VST3/**/*.vst3
+          path: build/TsengoVoiceSynth_artefacts/Release/VST3/
           if-no-files-found: error
 
   build-linux:
@@ -87,5 +85,5 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: TsengoVoiceSynth-VST3-Linux
-          path: build/TsengoVoiceSynth_artefacts/Release/VST3/**/*.vst3
+          path: build/TsengoVoiceSynth_artefacts/Release/VST3/
           if-no-files-found: error

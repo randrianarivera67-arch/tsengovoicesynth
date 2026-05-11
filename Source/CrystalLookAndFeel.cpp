@@ -8,9 +8,7 @@ using juce::MathConstants;
 
 CrystalLookAndFeel::CrystalLookAndFeel()
 {
-    monoFont_ = juce::Font (juce::FontOptions()
-                    .withName ("Courier New")
-                    .withHeight (10.0f));
+    monoFont_ = juce::Font ("Courier New", 10.0f, juce::Font::plain);
 
     setColour (juce::Slider::rotarySliderFillColourId,   Colour (colCyan));
     setColour (juce::Slider::rotarySliderOutlineColourId, Colour (colBgMid));

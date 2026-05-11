@@ -31,8 +31,6 @@ juce_add_plugin(TsengoVoiceSynth
 )
 
 # ── CRITICAL: Generate JuceHeader.h ──────────────────────────────────────────
-# Without this, every #include <JuceHeader.h> fails with "file not found".
-# Must be called AFTER juce_add_plugin and BEFORE target_sources.
 juce_generate_juce_header(TsengoVoiceSynth)
 
 # ── Sources ───────────────────────────────────────────────────────────────────
@@ -52,6 +50,7 @@ target_compile_definitions(TsengoVoiceSynth PUBLIC
 )
 
 # ── JUCE modules ──────────────────────────────────────────────────────────────
+# NOTE: juce::recommended_warning_flags removed in JUCE 7 — do NOT include it.
 target_link_libraries(TsengoVoiceSynth PRIVATE
     juce::juce_audio_basics
     juce::juce_audio_devices
