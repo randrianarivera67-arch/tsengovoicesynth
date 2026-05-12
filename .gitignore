@@ -1,18 +1,3 @@
 build/
-.vs/
-*.user
-*.suo
-*.opensdf
-*.sdf
+*.vst3
 .DS_Store
-Thumbs.db
-*.aps
-
-# JUCE
-JUCE/
-
-# IDE
-.vscode/
-.idea/
-*.xcuserstate
-*.xcworkspace/xcuserdata

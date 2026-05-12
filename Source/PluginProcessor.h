@@ -1,82 +1,105 @@
 #pragma once
 #include <JuceHeader.h>
-#include "YinPitchDetector.h"
+#include <atomic>
+#include <array>
+#include <deque>
 
-/**
- * TsengoVoiceSynth v2.1
- *
- * FL Studio Channel Rack instrument.
- * Mic audio arrives via sidechain bus from FL Studio Mixer.
- * Outputs MIDI noteOn/noteOff to the piano roll.
- */
-class TsengoVoiceSynthProcessor : public juce::AudioProcessor
+class TsengoProcessor : public juce::AudioProcessor,
+                        private juce::AudioIODeviceCallback
 {
 public:
-    TsengoVoiceSynthProcessor();
-    ~TsengoVoiceSynthProcessor() override;
+    TsengoProcessor();
+    ~TsengoProcessor() override;
 
-    void prepareToPlay   (double sampleRate, int samplesPerBlock) override;
+    //==========================================================================
+    void prepareToPlay (double sampleRate, int samplesPerBlock) override;
     void releaseResources() override;
-    void processBlock    (juce::AudioBuffer<float>&, juce::MidiBuffer&) override;
-    bool isBusesLayoutSupported (const BusesLayout&) const override;
+    void processBlock (juce::AudioBuffer<float>&, juce::MidiBuffer&) override;
 
+    //==========================================================================
     juce::AudioProcessorEditor* createEditor() override;
-    bool   hasEditor()      const override { return true; }
-    const juce::String getName() const override { return pluginName_; }
-    bool   acceptsMidi()    const override { return true; }
-    bool   producesMidi()   const override { return true; }
-    bool   isMidiEffect()   const override { return false; }
+    bool hasEditor() const override { return true; }
+
+    const juce::String getName() const override { return name_; }
+    bool acceptsMidi()  const override { return false; }
+    bool producesMidi() const override { return true;  }
+    bool isMidiEffect() const override { return false; }
     double getTailLengthSeconds() const override { return 0.0; }
 
-    int  getNumPrograms()    override { return 1; }
+    int  getNumPrograms()   override { return 1; }
     int  getCurrentProgram() override { return 0; }
     void setCurrentProgram (int) override {}
-    const juce::String getProgramName (int) override { return defaultPreset_; }
+    const juce::String getProgramName (int) override { return preset_; }
     void changeProgramName (int, const juce::String&) override {}
 
-    void getStateInformation (juce::MemoryBlock&) override;
-    void setStateInformation (const void*, int) override;
+    void getStateInformation (juce::MemoryBlock&) override {}
+    void setStateInformation (const void*, int) override {}
 
-    // ── Shared state (audio thread → UI thread) ───────────────────────────
-    struct DetectionState
-    {
-        float frequency    { 0.0f };
-        float confidence   { 0.0f };
-        int   midiNote     { -1   };
-        float midiCents    { 0.0f };
-        float inputLevel   { 0.0f };
-        bool  micConnected { false };
-    };
-    DetectionState getDetectionState() const noexcept;
+    //==========================================================================
+    // Mic device
+    juce::StringArray getInputDevices();
+    void openDevice (const juce::String& name);
+    void closeDevice();
+    juce::String getCurrentDevice() const { return currentDevice_; }
 
-    juce::AudioProcessorValueTreeState apvts;
-    static juce::AudioProcessorValueTreeState::ParameterLayout createParameterLayout();
+    // UI read-outs
+    float getMicLevel()  const { return micLevel_.load();  }
+    float getMidiLevel() const { return midiLevel_.load(); }
+    int   getNote()      const { return currentNote_.load(); }
+    float getPitchHz()   const { return currentHz_.load();  }
+    float getConfidence() const { return confidence_.load(); }
+
+    // Parameters
+    std::atomic<float> threshold { 0.10f };
+    std::atomic<float> smoothing { 0.15f };
+    std::atomic<float> gain      { 1.00f };
 
 private:
-    std::atomic<float>* pThreshold { nullptr };
-    std::atomic<float>* pVolume    { nullptr };
-    std::atomic<float>* pAttack    { nullptr };
-    std::atomic<float>* pRelease   { nullptr };
+    //==========================================================================
+    // AudioIODeviceCallback — mic capture
+    void audioDeviceIOCallbackWithContext(
+        const float* const* in, int numIn,
+        float* const* out,     int numOut,
+        int numSamples,
+        const juce::AudioIODeviceCallbackContext&) override;
+    void audioDeviceAboutToStart (juce::AudioIODevice*) override {}
+    void audioDeviceStopped() override {}
 
-    // 4096-sample buffer = ~93ms at 44.1kHz — better low-freq resolution
-    static constexpr int kYinBuf { 4096 };
-    YinPitchDetector yin_;
+    //==========================================================================
+    // YIN pitch detector — haute précision
+    float yinDetect (const float* buf, int N, float sr);
+    float parabolicInterp (const juce::Array<float>& d, int tau);
 
-    // MIDI state machine
-    int currentNote_    { -1 };
-    int candidateNote_  { -1 };
-    int candidateCount_ { 0  };
-    int releaseCounter_ { 0  };
+    //==========================================================================
+    // Mic ring buffer
+    static constexpr int RING = 65536;
+    std::array<float, RING> ring_ {};
+    std::atomic<int>  ringWrite_ { 0 };
+    float             yinBuf_[2048] {};
 
-    mutable juce::SpinLock stateLock_;
-    DetectionState sharedState_;
+    // MIDI state
+    std::atomic<int>   currentNote_ { -1 };
+    std::atomic<float> currentHz_   { 0.f };
+    std::atomic<float> confidence_  { 0.f };
+    std::atomic<float> micLevel_    { 0.f };
+    std::atomic<float> midiLevel_   { 0.f };
 
-    void emitNoteOn  (int note, uint8_t velocity, juce::MidiBuffer&, int offset);
-    void emitNoteOff (int note, juce::MidiBuffer&, int offset);
-    int  attackSamples()  const noexcept;
-    int  releaseSamples() const noexcept;
+    int  lastMidiNote_ { -1 };
+    int  noteHoldCount_{ 0  };
+    static constexpr int HOLD_FRAMES = 3;
 
-    const juce::String pluginName_ { "Tsengo Voice Synth" };
-    const juce::String defaultPreset_ { "Default" };
-    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (TsengoVoiceSynthProcessor)
+    // Median filter
+    static constexpr int MED = 7;
+    std::deque<float> medBuf_;
+
+    // Device manager
+    juce::AudioDeviceManager micMgr_;
+    juce::String currentDevice_;
+    bool deviceOpen_ { false };
+    double sampleRate_ { 44100.0 };
+
+    const juce::String name_   { "Tsengo Voice Synth" };
+    const juce::String preset_ { "Default" };
+
+    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (TsengoProcessor)
 };

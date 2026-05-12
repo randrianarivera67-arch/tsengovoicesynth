@@ -1,117 +1,55 @@
 #pragma once
 #include <JuceHeader.h>
 #include "PluginProcessor.h"
-#include "CrystalLookAndFeel.h"
 
-// ── Crystal background panel ──────────────────────────────────────────────────
-class CrystalPanel : public juce::Component
+class TsengoEditor : public juce::AudioProcessorEditor,
+                     private juce::Timer
 {
 public:
-    explicit CrystalPanel (const juce::String& title = {});
-    void paint (juce::Graphics&) override;
-private:
-    juce::String title_;
-};
+    explicit TsengoEditor (TsengoProcessor&);
+    ~TsengoEditor() override;
 
-// ── Animated waveform ─────────────────────────────────────────────────────────
-class WaveformDisplay : public juce::Component, private juce::Timer
-{
-public:
-    WaveformDisplay();
-    void setLevel     (float l) noexcept { level_     = l; }
-    void setFrequency (float f) noexcept { frequency_ = f; }
-    void paint (juce::Graphics&) override;
-    void timerCallback() override { repaint(); }
-private:
-    std::atomic<float> level_     { 0.0f };
-    std::atomic<float> frequency_ { 0.0f };
-    float phase_   { 0.0f };
-    float waveAmp_ { 0.0f };
-};
-
-// ── Level meter (vertical) ────────────────────────────────────────────────────
-class LevelMeter : public juce::Component
-{
-public:
-    enum class MeterColour { Green, Orange };
-    LevelMeter (MeterColour c, const juce::String& label);
-    void setValue (float v) noexcept { value_ = juce::jlimit (0.0f, 1.0f, v); }
-    void paint (juce::Graphics&) override;
-private:
-    MeterColour  meterColour_;
-    juce::String label_;
-    float        value_ { 0.0f };
-};
-
-// ── Read-only piano strip C3–B5 ───────────────────────────────────────────────
-class PianoStrip : public juce::Component
-{
-public:
-    PianoStrip();
-    void setActiveNote (int midi) noexcept { activeNote_ = midi; repaint(); }
-    void paint (juce::Graphics&) override;
-private:
-    static constexpr int kFirst { 48 };
-    static constexpr int kLast  { 83 };
-    int activeNote_ { -1 };
-    struct Key { int midi; bool black; float x, w, h; };
-    std::vector<Key> keys_;
-    void buildKeys (int totalWidth);
-};
-
-// ── Main editor ───────────────────────────────────────────────────────────────
-class TsengoVoiceSynthEditor : public juce::AudioProcessorEditor,
-                                private juce::Timer
-{
-public:
-    explicit TsengoVoiceSynthEditor (TsengoVoiceSynthProcessor&);
-    ~TsengoVoiceSynthEditor() override;
-
-    void paint  (juce::Graphics&) override;
-    void resized() override;
+    void paint   (juce::Graphics&) override;
+    void resized () override;
 
 private:
     void timerCallback() override;
+    void refreshDevices();
 
-    TsengoVoiceSynthProcessor& proc_;
-    CrystalLookAndFeel laf_;
+    TsengoProcessor& p_;
 
-    // Header
-    juce::Label titleLabel_, versionLabel_;
+    // Device selector
+    juce::Label    lblDevice_;
+    juce::ComboBox cmbDevice_;
+    juce::TextButton btnRefresh_ { "↺" };
+    juce::TextButton btnConnect_ { "CONNECT" };
 
-    // Left panel
-    CrystalPanel    leftPanel_;
-    juce::Label     micLabel_, statusLabel_;
-    juce::Label     noteLabel_, freqLabel_;
-    juce::Label     confTitleLabel_, confValLabel_;
-    WaveformDisplay waveform_;
+    // Knobs
+    juce::Slider sldThreshold_, sldSmoothing_, sldGain_;
+    juce::Label  lblThr_, lblSmo_, lblGain_;
 
-    // Sidechain status banner
-    juce::Label     scStatusLabel_;
-
-    // Center panel — knobs
-    CrystalPanel centerPanel_;
-    juce::Slider threshSlider_, volumeSlider_, attackSlider_, releaseSlider_;
-    juce::Label  threshLbl_,    volumeLbl_,    attackLbl_,    releaseLbl_;
-
-    using APVTS = juce::AudioProcessorValueTreeState;
-    std::unique_ptr<APVTS::SliderAttachment> threshAtt_, volumeAtt_,
-                                              attackAtt_, releaseAtt_;
-    // Right panel
-    CrystalPanel rightPanel_;
-    juce::Label  midiNoteLabel_, midiNumLabel_, midiChLabel_;
+    // Display
+    juce::Label lblNote_, lblHz_, lblConf_;
 
     // Meters
-    LevelMeter inMeter_  { LevelMeter::MeterColour::Green,  "IN"  };
-    LevelMeter outMeter_ { LevelMeter::MeterColour::Orange, "OUT" };
+    float dispMic_  = 0.f;
+    float dispMidi_ = 0.f;
 
-    // Piano
-    PianoStrip piano_;
+    // Note names
+    static const char* noteName (int m)
+    {
+        static const char* n[] = {"C","C#","D","D#","E","F","F#","G","G#","A","A#","B"};
+        return m >= 0 ? n[m % 12] : "--";
+    }
 
-    float blinkPhase_ { 0.0f };
+    // Colors
+    static juce::Colour cyan()   { return juce::Colour (0xFF00E5FF); }
+    static juce::Colour dark()   { return juce::Colour (0xFF080D18); }
+    static juce::Colour panel()  { return juce::Colour (0xFF0F1929); }
+    static juce::Colour surf()   { return juce::Colour (0xFF172236); }
+    static juce::Colour green()  { return juce::Colour (0xFF00C853); }
+    static juce::Colour orange() { return juce::Colour (0xFFFF6D00); }
+    static juce::Colour purple() { return juce::Colour (0xFF7C4DFF); }
 
-    static const juce::String kNoteNames[12];
-    static juce::String midiName (int note);
-
-    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (TsengoVoiceSynthEditor)
+    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (TsengoEditor)
 };

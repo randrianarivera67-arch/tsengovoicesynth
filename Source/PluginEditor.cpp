@@ -1,458 +1,217 @@
 #include "PluginEditor.h"
 
-static constexpr uint32_t kCyan   = 0xFF00D4FF;
-static constexpr uint32_t kBg     = 0xFF05080F;
-static constexpr uint32_t kBgMid  = 0xFF090E1C;
-static constexpr uint32_t kText   = 0xFFC8EEFF;
-static constexpr uint32_t kGreen  = 0xFF00E676;
-static constexpr uint32_t kOrange = 0xFFFF6D00;
-static constexpr uint32_t kRed    = 0xFFFF3B3B;
-
-using juce::Colour;
-
-// ═════════════════════════════════════════════════════════════════════════════
-CrystalPanel::CrystalPanel (const juce::String& title) : title_ (title) {}
-
-void CrystalPanel::paint (juce::Graphics& g)
+static void styleKnob (juce::Slider& s, juce::Colour c)
 {
-    auto b = getLocalBounds().toFloat();
-    g.setColour (Colour (kBgMid));
-    g.fillRoundedRectangle (b, 6.0f);
-    g.setColour (Colour (kCyan).withAlpha (0.13f));
-    g.drawRoundedRectangle (b.reduced (0.5f), 6.0f, 0.8f);
-    if (title_.isNotEmpty())
-    {
-        g.setColour (Colour (kCyan).withAlpha (0.35f));
-        g.setFont (juce::Font ("Courier New", 8.0f, juce::Font::plain));
-        g.drawText (title_, 10, 6, getWidth() - 12, 10, juce::Justification::left);
-    }
+    s.setSliderStyle (juce::Slider::RotaryVerticalDrag);
+    s.setTextBoxStyle (juce::Slider::NoTextBox, false, 0, 0);
+    s.setColour (juce::Slider::rotarySliderFillColourId,    c);
+    s.setColour (juce::Slider::rotarySliderOutlineColourId, c.withAlpha (0.2f));
+    s.setColour (juce::Slider::backgroundColourId,          juce::Colour (0xFF080D18));
 }
 
-// ═════════════════════════════════════════════════════════════════════════════
-WaveformDisplay::WaveformDisplay() { startTimerHz (30); }
-
-void WaveformDisplay::paint (juce::Graphics& g)
+static void styleLabel (juce::Label& l, const juce::String& t,
+                         float size, juce::Colour c,
+                         juce::Justification j = juce::Justification::centred)
 {
-    auto b = getLocalBounds().toFloat();
-    g.setColour (Colour (kBg));
-    g.fillRoundedRectangle (b, 3.0f);
-    g.setColour (Colour (kCyan).withAlpha (0.08f));
-    g.drawRoundedRectangle (b.reduced (0.4f), 3.0f, 0.7f);
-
-    const float cy = b.getCentreY();
-    g.setColour (Colour (kCyan).withAlpha (0.08f));
-    g.drawHorizontalLine ((int)cy, b.getX(), b.getRight());
-
-    const float tgt = level_.load() * 0.85f;
-    waveAmp_ += (tgt - waveAmp_) * 0.1f;
-    phase_ += 0.09f;
-
-    const float W = b.getWidth(), H = b.getHeight();
-    const float fr = frequency_.load();
-    const float fm = fr > 0.0f ? (fr / 220.0f) * 2.5f : 1.0f;
-
-    juce::Path wave;
-    bool first = true;
-    for (float i = 0.0f; i < W; i += 1.0f)
-    {
-        const float s = std::sin (phase_ + i * 0.1f * fm) * 0.7f
-                      + std::sin (phase_ * 2.1f + i * 0.05f) * 0.2f;
-        const float y = cy - s * waveAmp_ * (H * 0.4f);
-        if (first) { wave.startNewSubPath (b.getX() + i, y); first = false; }
-        else        wave.lineTo           (b.getX() + i, y);
-    }
-    g.setColour (Colour (kCyan).withAlpha (waveAmp_ > 0.02f ? 0.85f : 0.25f));
-    g.strokePath (wave, juce::PathStrokeType (1.5f));
+    l.setText (t, juce::dontSendNotification);
+    l.setFont (juce::Font ("Courier New", size, juce::Font::plain));
+    l.setColour (juce::Label::textColourId, c);
+    l.setJustificationType (j);
 }
 
-// ═════════════════════════════════════════════════════════════════════════════
-LevelMeter::LevelMeter (MeterColour c, const juce::String& lbl)
-    : meterColour_ (c), label_ (lbl) {}
-
-void LevelMeter::paint (juce::Graphics& g)
+//==============================================================================
+TsengoEditor::TsengoEditor (TsengoProcessor& p)
+    : AudioProcessorEditor (&p), p_ (p)
 {
-    auto b = getLocalBounds().toFloat();
-    // Label at top
-    g.setColour (Colour (kCyan).withAlpha (0.3f));
-    g.setFont (juce::Font ("Courier New", 8.0f, juce::Font::plain));
-    g.drawText (label_, 0, 0, getWidth(), 14, juce::Justification::centred);
+    setSize (480, 400);
 
-    auto track = b.withTrimmedTop (16.0f);
-    g.setColour (Colour (kCyan).withAlpha (0.06f));
-    g.fillRoundedRectangle (track, 2.0f);
+    // Device selector
+    styleLabel (lblDevice_, "MICROPHONE INPUT", 10.f,
+                cyan().withAlpha (0.6f), juce::Justification::left);
 
-    const float fillH = track.getHeight() * value_;
-    auto fill = track.removeFromBottom (fillH);
-    const Colour col = meterColour_ == MeterColour::Green
-                       ? Colour (kGreen) : Colour (kOrange);
-    g.setColour (col.withAlpha (0.85f));
-    g.fillRoundedRectangle (fill, 2.0f);
-}
+    cmbDevice_.setColour (juce::ComboBox::backgroundColourId, surf());
+    cmbDevice_.setColour (juce::ComboBox::textColourId,       juce::Colours::white);
+    cmbDevice_.setColour (juce::ComboBox::outlineColourId,    cyan().withAlpha (0.3f));
+    cmbDevice_.setColour (juce::ComboBox::arrowColourId,      cyan());
+    addAndMakeVisible (cmbDevice_);
+    addAndMakeVisible (lblDevice_);
 
-// ═════════════════════════════════════════════════════════════════════════════
-static const bool kIsBlack[12] = {false,true,false,true,false,false,true,false,true,false,true,false};
+    btnRefresh_.setColour (juce::TextButton::buttonColourId,  surf());
+    btnRefresh_.setColour (juce::TextButton::textColourOffId, cyan());
+    btnRefresh_.onClick = [this] { refreshDevices(); };
+    addAndMakeVisible (btnRefresh_);
 
-PianoStrip::PianoStrip() { setInterceptsMouseClicks (false, false); }
-
-void PianoStrip::buildKeys (int totalWidth)
-{
-    keys_.clear();
-    int whiteCount = 0;
-    for (int m = kFirst; m <= kLast; ++m)
-        if (!kIsBlack[m % 12]) ++whiteCount;
-
-    const float ww = (float)totalWidth / whiteCount;
-    int wi = 0;
-    for (int m = kFirst; m <= kLast; ++m)
+    btnConnect_.setColour (juce::TextButton::buttonColourId,  cyan().withAlpha (0.15f));
+    btnConnect_.setColour (juce::TextButton::textColourOffId, cyan());
+    btnConnect_.onClick = [this]
     {
-        if (!kIsBlack[m % 12])
-        {
-            keys_.push_back ({ m, false, wi * ww, ww - 0.5f, (float)getHeight() });
-            ++wi;
-        }
-    }
-    wi = 0;
-    for (int m = kFirst; m <= kLast; ++m)
-    {
-        if (!kIsBlack[m % 12]) { ++wi; continue; }
-        keys_.push_back ({ m, true, (wi - 1) * ww + ww * 0.62f, ww * 0.58f,
-                           (float)getHeight() * 0.62f });
-    }
-}
-
-void PianoStrip::paint (juce::Graphics& g)
-{
-    if (keys_.empty() || (int)keys_.front().h != getHeight())
-        buildKeys (getWidth());
-
-    g.setColour (Colour (kBg));
-    g.fillAll();
-
-    for (auto& k : keys_)
-    {
-        if (k.black) continue;
-        const bool a = k.midi == activeNote_;
-        g.setColour (a ? Colour (kCyan) : Colour (0xFFDDEEFF));
-        g.fillRect (k.x, 0.0f, k.w, k.h);
-        g.setColour (Colour (kBg).withAlpha (0.5f));
-        g.drawRect (k.x, 0.0f, k.w, k.h, 0.5f);
-        if (k.midi % 12 == 0)
-        {
-            g.setColour (a ? Colour (kBg) : Colour (0xFF888888));
-            g.setFont (juce::Font ("Courier New", 7.0f, juce::Font::plain));
-            g.drawText ("C" + juce::String (k.midi / 12 - 1),
-                        (int)k.x, (int)k.h - 12, (int)k.w, 10,
-                        juce::Justification::centred);
-        }
-    }
-    for (auto& k : keys_)
-    {
-        if (!k.black) continue;
-        const bool a = k.midi == activeNote_;
-        g.setColour (a ? Colour (0xFF0055CC) : Colour (kBgMid));
-        g.fillRect (k.x, 0.0f, k.w, k.h);
-        if (a)
-        {
-            g.setColour (Colour (kCyan).withAlpha (0.7f));
-            g.drawRect (k.x, 0.0f, k.w, k.h, 0.8f);
-        }
-    }
-}
-
-// ═════════════════════════════════════════════════════════════════════════════
-const juce::String TsengoVoiceSynthEditor::kNoteNames[12]
-    = { "C","C#","D","D#","E","F","F#","G","G#","A","A#","B" };
-
-juce::String TsengoVoiceSynthEditor::midiName (int note)
-{
-    if (note < 0) return "--";
-    return kNoteNames[note % 12] + juce::String (note / 12 - 1);
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-TsengoVoiceSynthEditor::TsengoVoiceSynthEditor (TsengoVoiceSynthProcessor& p)
-    : AudioProcessorEditor (&p), proc_ (p),
-      leftPanel_   ("MICROPHONE"),
-      centerPanel_ ("PARAMETERS"),
-      rightPanel_  ("MIDI OUTPUT")
-{
-    setLookAndFeel (&laf_);
-    setSize (640, 430);
-
-    // ── Title bar ─────────────────────────────────────────────────────────
-    titleLabel_.setText ("TSENGO  VOICE  SYNTH", juce::dontSendNotification);
-    titleLabel_.setColour (juce::Label::textColourId, Colour (kCyan));
-    titleLabel_.setFont (juce::Font ("Courier New", 13.0f, juce::Font::plain));
-    addAndMakeVisible (titleLabel_);
-
-    versionLabel_.setText ("MIC \xe2\x86\x92 MIDI  \xc2\xb7  Channel Rack  \xc2\xb7  v2.1",
-                           juce::dontSendNotification);
-    versionLabel_.setColour (juce::Label::textColourId, Colour (kCyan).withAlpha (0.3f));
-    versionLabel_.setFont (juce::Font ("Courier New", 8.0f, juce::Font::plain));
-    versionLabel_.setJustificationType (juce::Justification::right);
-    addAndMakeVisible (versionLabel_);
-
-    // ── Sidechain status ──────────────────────────────────────────────────
-    scStatusLabel_.setText ("! CONNECTER LE MIC : Mixer \xe2\x86\x92 Sidechain",
-                            juce::dontSendNotification);
-    scStatusLabel_.setColour (juce::Label::textColourId, Colour (kOrange));
-    scStatusLabel_.setColour (juce::Label::backgroundColourId,
-                              Colour (kOrange).withAlpha (0.1f));
-    scStatusLabel_.setFont (juce::Font ("Courier New", 8.5f, juce::Font::plain));
-    scStatusLabel_.setJustificationType (juce::Justification::centred);
-    addAndMakeVisible (scStatusLabel_);
-
-    // ── Left panel ─────────────────────────────────────────────────────────
-    addAndMakeVisible (leftPanel_);
-
-    micLabel_.setText ("SIGNAL AUDIO", juce::dontSendNotification);
-    addAndMakeVisible (micLabel_);
-
-    addAndMakeVisible (waveform_);
-
-    statusLabel_.setFont (juce::Font ("Courier New", 8.0f, juce::Font::plain));
-    addAndMakeVisible (statusLabel_);
-
-    noteLabel_.setColour (juce::Label::textColourId, Colour (kCyan));
-    noteLabel_.setFont (juce::Font ("Courier New", 32.0f, juce::Font::plain));
-    noteLabel_.setJustificationType (juce::Justification::centred);
-    noteLabel_.setText ("--", juce::dontSendNotification);
-    addAndMakeVisible (noteLabel_);
-
-    freqLabel_.setColour (juce::Label::textColourId, Colour (kCyan).withAlpha (0.5f));
-    freqLabel_.setFont (juce::Font ("Courier New", 9.0f, juce::Font::plain));
-    freqLabel_.setJustificationType (juce::Justification::centred);
-    freqLabel_.setText ("-- Hz", juce::dontSendNotification);
-    addAndMakeVisible (freqLabel_);
-
-    confTitleLabel_.setText ("YIN CONFIDENCE", juce::dontSendNotification);
-    addAndMakeVisible (confTitleLabel_);
-
-    confValLabel_.setColour (juce::Label::textColourId, Colour (kCyan).withAlpha (0.6f));
-    confValLabel_.setFont (juce::Font ("Courier New", 8.0f, juce::Font::plain));
-    confValLabel_.setJustificationType (juce::Justification::right);
-    confValLabel_.setText ("0%", juce::dontSendNotification);
-    addAndMakeVisible (confValLabel_);
-
-    // ── Center knobs ───────────────────────────────────────────────────────
-    addAndMakeVisible (centerPanel_);
-
-    auto addKnob = [&] (juce::Slider& sl, juce::Label& lbl,
-                        const juce::String& paramId, const juce::String& name,
-                        std::unique_ptr<APVTS::SliderAttachment>& att)
-    {
-        sl.setSliderStyle (juce::Slider::RotaryVerticalDrag);
-        sl.setTextBoxStyle (juce::Slider::NoTextBox, false, 0, 0);
-        addAndMakeVisible (sl);
-        lbl.setText (name, juce::dontSendNotification);
-        lbl.setJustificationType (juce::Justification::centred);
-        addAndMakeVisible (lbl);
-        att = std::make_unique<APVTS::SliderAttachment> (proc_.apvts, paramId, sl);
+        auto name = cmbDevice_.getText();
+        if (name.isNotEmpty()) p_.openDevice (name);
     };
+    addAndMakeVisible (btnConnect_);
 
-    addKnob (threshSlider_, threshLbl_, "threshold", "THRESHOLD", threshAtt_);
-    addKnob (volumeSlider_, volumeLbl_, "volume",    "VOLUME",    volumeAtt_);
-    addKnob (attackSlider_, attackLbl_, "attack",    "ATTACK",    attackAtt_);
-    addKnob (releaseSlider_,releaseLbl_,"release",   "RELEASE",   releaseAtt_);
+    // Knobs
+    sldThreshold_.setRange (0.01, 0.5,  0.01); sldThreshold_.setValue (0.10);
+    sldSmoothing_.setRange (0.01, 0.5,  0.01); sldSmoothing_.setValue (0.15);
+    sldGain_     .setRange (0.5,  4.0,  0.1);  sldGain_     .setValue (1.0);
+    styleKnob (sldThreshold_, orange());
+    styleKnob (sldSmoothing_, purple());
+    styleKnob (sldGain_,      green());
+    sldThreshold_.onValueChange = [this] { p_.threshold = (float)sldThreshold_.getValue(); };
+    sldSmoothing_.onValueChange = [this] { p_.smoothing = (float)sldSmoothing_.getValue(); };
+    sldGain_     .onValueChange = [this] { p_.gain      = (float)sldGain_     .getValue(); };
+    addAndMakeVisible (sldThreshold_);
+    addAndMakeVisible (sldSmoothing_);
+    addAndMakeVisible (sldGain_);
 
-    // ── Right panel ────────────────────────────────────────────────────────
-    addAndMakeVisible (rightPanel_);
+    styleLabel (lblThr_,  "THRESHOLD", 9.f, juce::Colours::white.withAlpha (0.4f));
+    styleLabel (lblSmo_,  "SMOOTH",    9.f, juce::Colours::white.withAlpha (0.4f));
+    styleLabel (lblGain_, "GAIN",      9.f, juce::Colours::white.withAlpha (0.4f));
+    addAndMakeVisible (lblThr_);
+    addAndMakeVisible (lblSmo_);
+    addAndMakeVisible (lblGain_);
 
-    midiNoteLabel_.setColour (juce::Label::textColourId, Colour (kCyan));
-    midiNoteLabel_.setFont (juce::Font ("Courier New", 22.0f, juce::Font::plain));
-    midiNoteLabel_.setJustificationType (juce::Justification::centred);
-    midiNoteLabel_.setText ("--", juce::dontSendNotification);
-    addAndMakeVisible (midiNoteLabel_);
+    // Display labels
+    styleLabel (lblNote_, "--",    36.f, cyan());
+    styleLabel (lblHz_,   "0 Hz",  12.f, juce::Colours::white.withAlpha (0.6f));
+    styleLabel (lblConf_, "0%",    11.f, green());
+    addAndMakeVisible (lblNote_);
+    addAndMakeVisible (lblHz_);
+    addAndMakeVisible (lblConf_);
 
-    midiNumLabel_.setColour (juce::Label::textColourId, Colour (kCyan).withAlpha (0.35f));
-    midiNumLabel_.setFont (juce::Font ("Courier New", 8.0f, juce::Font::plain));
-    midiNumLabel_.setJustificationType (juce::Justification::centred);
-    midiNumLabel_.setText ("MIDI CH 1", juce::dontSendNotification);
-    addAndMakeVisible (midiNumLabel_);
-
-    midiChLabel_.setColour (juce::Label::textColourId, Colour (kCyan).withAlpha (0.4f));
-    midiChLabel_.setFont (juce::Font ("Courier New", 8.0f, juce::Font::plain));
-    midiChLabel_.setJustificationType (juce::Justification::centred);
-    addAndMakeVisible (midiChLabel_);
-
-    addAndMakeVisible (inMeter_);
-    addAndMakeVisible (outMeter_);
-    addAndMakeVisible (piano_);
-
+    refreshDevices();
     startTimerHz (30);
 }
 
-TsengoVoiceSynthEditor::~TsengoVoiceSynthEditor()
+TsengoEditor::~TsengoEditor() { stopTimer(); }
+
+//==============================================================================
+void TsengoEditor::refreshDevices()
 {
-    setLookAndFeel (nullptr);
+    cmbDevice_.clear();
+    auto devs = p_.getInputDevices();
+    for (int i = 0; i < devs.size(); ++i)
+        cmbDevice_.addItem (devs[i], i + 1);
+    if (cmbDevice_.getNumItems() > 0)
+        cmbDevice_.setSelectedItemIndex (0);
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-void TsengoVoiceSynthEditor::resized()
+//==============================================================================
+void TsengoEditor::timerCallback()
 {
-    auto area = getLocalBounds();
+    // Smooth meters
+    dispMic_  += (p_.getMicLevel()  - dispMic_)  * 0.2f;
+    dispMidi_ += (p_.getMidiLevel() - dispMidi_) * 0.15f;
 
-    // Header 44px
-    auto hdr = area.removeFromTop (44);
-    titleLabel_  .setBounds (hdr.removeFromLeft (300).reduced (10, 12));
-    versionLabel_.setBounds (hdr.reduced (8, 14));
+    // Note display
+    int   note = p_.getNote();
+    float hz   = p_.getPitchHz();
+    float conf = p_.getConfidence();
 
-    // Sidechain status bar 20px
-    scStatusLabel_.setBounds (area.removeFromTop (20).reduced (6, 2));
-
-    // Piano at bottom 66px
-    piano_.setBounds (area.removeFromBottom (66));
-
-    // Body
-    auto body = area.reduced (6, 4);
-    auto meters = body.removeFromRight (46);
-    inMeter_ .setBounds (meters.removeFromLeft (20).reduced (2, 4));
-    outMeter_.setBounds (meters.reduced (2, 4));
-
-    // Left ~180
-    auto leftArea = body.removeFromLeft (180);
-    leftPanel_.setBounds (leftArea);
-    auto lIn = leftArea.reduced (8, 18);
-    micLabel_       .setBounds (lIn.removeFromTop (10));
-    waveform_       .setBounds (lIn.removeFromTop (54));
-    lIn.removeFromTop (4);
-    statusLabel_    .setBounds (lIn.removeFromTop (12));
-    lIn.removeFromTop (4);
-    noteLabel_      .setBounds (lIn.removeFromTop (40));
-    freqLabel_      .setBounds (lIn.removeFromTop (14));
-    lIn.removeFromTop (4);
-    auto crow = lIn.removeFromTop (10);
-    confTitleLabel_ .setBounds (crow.removeFromLeft (110));
-    confValLabel_   .setBounds (crow);
-
-    body.removeFromLeft (6);
-
-    // Right ~140
-    auto rightArea = body.removeFromRight (140);
-    rightPanel_.setBounds (rightArea);
-    auto rIn = rightArea.reduced (8, 18);
-    rIn.removeFromTop (8);
-    midiChLabel_  .setBounds (rIn.removeFromTop (10));
-    midiNoteLabel_.setBounds (rIn.removeFromTop (46));
-    midiNumLabel_ .setBounds (rIn.removeFromTop (12));
-
-    body.removeFromRight (6);
-
-    // Center — knobs
-    centerPanel_.setBounds (body);
-    auto cIn = body.reduced (8, 18);
-    const int kw = cIn.getWidth()  / 2;
-    const int kh = cIn.getHeight() / 2;
-
-    auto placeKnob = [] (juce::Slider& sl, juce::Label& lb,
-                         juce::Rectangle<int> cell)
+    if (note >= 0)
     {
-        lb.setBounds (cell.removeFromBottom (14));
-        sl.setBounds (cell.reduced (4));
-    };
-    auto r1 = cIn.removeFromTop (kh);
-    auto r2 = cIn;
-    placeKnob (threshSlider_, threshLbl_,  r1.removeFromLeft (kw));
-    placeKnob (volumeSlider_, volumeLbl_,  r1);
-    placeKnob (attackSlider_, attackLbl_,  r2.removeFromLeft (kw));
-    placeKnob (releaseSlider_,releaseLbl_, r2);
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-void TsengoVoiceSynthEditor::paint (juce::Graphics& g)
-{
-    g.fillAll (Colour (kBg));
-
-    // Header gradient
-    juce::ColourGradient hg (Colour (kBgMid), 0, 0, Colour (kBg), 0, 44, false);
-    g.setGradientFill (hg);
-    g.fillRect (0, 0, getWidth(), 44);
-    g.setColour (Colour (kCyan).withAlpha (0.12f));
-    g.drawHorizontalLine (43, 0.0f, (float)getWidth());
-
-    // Blinking dot
-    const float a = 0.5f + 0.5f * std::sin (blinkPhase_);
-    g.setColour (Colour (kCyan).withAlpha (a));
-    g.fillEllipse (8.0f, 18.0f, 7.0f, 7.0f);
-
-    // Confidence bar inside left panel
-    const auto state = proc_.getDetectionState();
-    const auto lb = leftPanel_.getBounds();
-    const int bY  = lb.getBottom() - 22;
-    const int bX  = lb.getX() + 16;
-    const int bW  = lb.getWidth() - 32;
-    g.setColour (Colour (kCyan).withAlpha (0.07f));
-    g.fillRoundedRectangle ((float)bX, (float)bY, (float)bW, 2.0f, 1.0f);
-    g.setColour (Colour (kCyan).withAlpha (0.7f));
-    g.fillRoundedRectangle ((float)bX, (float)bY,
-                            bW * state.confidence, 2.0f, 1.0f);
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-void TsengoVoiceSynthEditor::timerCallback()
-{
-    blinkPhase_ += 0.12f;
-    if (blinkPhase_ > juce::MathConstants<float>::twoPi)
-        blinkPhase_ -= juce::MathConstants<float>::twoPi;
-
-    const auto s = proc_.getDetectionState();
-
-    // Sidechain banner
-    if (s.micConnected)
-    {
-        scStatusLabel_.setText ("\xe2\x9c\x93  MIC SIDECHAIN CONNECTE",
-                                juce::dontSendNotification);
-        scStatusLabel_.setColour (juce::Label::textColourId, Colour (kGreen));
-        scStatusLabel_.setColour (juce::Label::backgroundColourId,
-                                  Colour (kGreen).withAlpha (0.08f));
-    }
-    else
-    {
-        scStatusLabel_.setText ("! CONNECTER LE MIC : Mixer \xe2\x86\x92 Sidechain",
-                                juce::dontSendNotification);
-        scStatusLabel_.setColour (juce::Label::textColourId, Colour (kOrange));
-        scStatusLabel_.setColour (juce::Label::backgroundColourId,
-                                  Colour (kOrange).withAlpha (0.1f));
-    }
-
-    waveform_.setLevel     (s.inputLevel);
-    waveform_.setFrequency (s.frequency);
-
-    if (s.midiNote >= 0)
-    {
-        noteLabel_    .setText (kNoteNames[s.midiNote % 12]
-                                + juce::String (s.midiNote / 12 - 1),
-                                juce::dontSendNotification);
-        freqLabel_    .setText (juce::String (s.frequency, 1) + " Hz",
-                                juce::dontSendNotification);
-        midiNoteLabel_.setText (kNoteNames[s.midiNote % 12]
-                                + juce::String (s.midiNote / 12 - 1),
-                                juce::dontSendNotification);
-        midiChLabel_  .setText ("NOTE " + juce::String (s.midiNote),
-                                juce::dontSendNotification);
-    }
-    else
-    {
-        noteLabel_    .setText ("--", juce::dontSendNotification);
-        freqLabel_    .setText ("-- Hz", juce::dontSendNotification);
-        midiNoteLabel_.setText ("--", juce::dontSendNotification);
-        midiChLabel_  .setText ("--", juce::dontSendNotification);
-    }
-
-    confValLabel_.setText (juce::String (juce::roundToInt (s.confidence * 100)) + "%",
-                           juce::dontSendNotification);
-
-    statusLabel_.setText (s.inputLevel > 0.005f ? "\xe2\x97\x89  SIGNAL DETECTE"
-                                                 : "\xe2\x97\x8b  EN ATTENTE...",
+        int oct = note / 12 - 1;
+        lblNote_.setText (juce::String (noteName (note)) + juce::String (oct),
                           juce::dontSendNotification);
-    statusLabel_.setColour (juce::Label::textColourId,
-                            s.inputLevel > 0.005f
-                            ? Colour (kGreen).withAlpha (0.85f)
-                            : Colour (kCyan).withAlpha (0.35f));
-
-    inMeter_ .setValue (s.inputLevel);
-    outMeter_.setValue (s.midiNote >= 0 ? s.inputLevel * 0.9f : 0.0f);
-    piano_   .setActiveNote (s.midiNote);
+        lblNote_.setColour (juce::Label::textColourId, cyan());
+        lblHz_  .setText (juce::String (hz, 1) + " Hz", juce::dontSendNotification);
+        lblConf_.setText (juce::String (juce::roundToInt (conf * 100)) + "%",
+                          juce::dontSendNotification);
+    }
+    else
+    {
+        lblNote_.setText ("--", juce::dontSendNotification);
+        lblNote_.setColour (juce::Label::textColourId, juce::Colours::grey);
+        lblHz_  .setText ("0 Hz", juce::dontSendNotification);
+        lblConf_.setText ("0%",   juce::dontSendNotification);
+    }
 
     repaint();
+}
+
+//==============================================================================
+void TsengoEditor::paint (juce::Graphics& g)
+{
+    const int W = getWidth(), H = getHeight();
+
+    // Background
+    g.fillAll (dark());
+
+    // Header
+    g.setColour (panel());
+    g.fillRect (0, 0, W, 46);
+    g.setColour (cyan().withAlpha (0.12f));
+    g.fillRect (0, 45, W, 1);
+
+    // Title
+    g.setFont (juce::Font ("Courier New", 15.f, juce::Font::bold));
+    g.setColour (cyan());
+    g.drawText ("TSENGO  VOICE  SYNTH  v3.0", 0, 0, W, 46,
+                juce::Justification::centred);
+
+    // Dot
+    g.setColour (cyan());
+    g.fillEllipse (14.f, 18.f, 9.f, 9.f);
+    g.setColour (cyan().withAlpha (0.35f));
+    g.drawEllipse (12.f, 16.f, 13.f, 13.f, 1.2f);
+
+    // Note box
+    g.setColour (panel());
+    g.fillRoundedRectangle (12.f, 54.f, 200.f, 82.f, 7.f);
+    g.setColour (cyan().withAlpha (0.15f));
+    g.drawRoundedRectangle (12.f, 54.f, 200.f, 82.f, 7.f, 1.f);
+    g.setFont (juce::Font ("Courier New", 9.f, juce::Font::plain));
+    g.setColour (juce::Colours::white.withAlpha (0.3f));
+    g.drawText ("NOTA DETEKTEE", 20, 57, 180, 13, juce::Justification::left);
+
+    // Meters
+    const int mx = 370, my = 54, mw = 16, mh = 82;
+    g.setColour (juce::Colour (0xFF050A12));
+    g.fillRoundedRectangle ((float)mx,      (float)my, (float)mw, (float)mh, 4.f);
+    g.fillRoundedRectangle ((float)mx + 22, (float)my, (float)mw, (float)mh, 4.f);
+
+    float micH  = juce::jlimit (0.f, (float)mh, dispMic_  * mh);
+    float midiH = juce::jlimit (0.f, (float)mh, dispMidi_ * mh);
+    g.setColour (green());
+    if (micH  > 0) g.fillRoundedRectangle ((float)mx,      my + mh - micH,  (float)mw, micH,  3.f);
+    g.setColour (cyan());
+    if (midiH > 0) g.fillRoundedRectangle ((float)mx + 22, my + mh - midiH, (float)mw, midiH, 3.f);
+
+    g.setFont (juce::Font ("Courier New", 8.f, juce::Font::plain));
+    g.setColour (juce::Colours::white.withAlpha (0.3f));
+    g.drawText ("MIC",  mx,      my + mh + 3, mw,   10, juce::Justification::centred);
+    g.drawText ("MIDI", mx + 22, my + mh + 3, mw+4, 10, juce::Justification::centred);
+
+    // Knob section background
+    g.setColour (panel());
+    g.fillRoundedRectangle (12.f, 200.f, (float)W - 24.f, 80.f, 7.f);
+    g.setColour (cyan().withAlpha (0.1f));
+    g.drawRoundedRectangle (12.f, 200.f, (float)W - 24.f, 80.f, 7.f, 1.f);
+    g.setFont (juce::Font ("Courier New", 9.f, juce::Font::plain));
+    g.setColour (juce::Colours::white.withAlpha (0.25f));
+    g.drawText ("PARAMÈTRES", 22, 203, 140, 12, juce::Justification::left);
+}
+
+//==============================================================================
+void TsengoEditor::resized()
+{
+    // Header → device
+    lblDevice_.setBounds (12, 54 + 82 + 10, 200, 14);
+    cmbDevice_.setBounds (12, 54 + 82 + 26, 300, 26);
+    btnRefresh_.setBounds (316, 54 + 82 + 26, 30,  26);
+    btnConnect_.setBounds (350, 54 + 82 + 26, 90,  26);
+
+    // Note display inside note box
+    lblNote_.setBounds (20, 66, 120, 50);
+    lblHz_  .setBounds (140, 70, 65, 18);
+    lblConf_.setBounds (140, 90, 65, 18);
+
+    // Knobs
+    const int ky = 210, kw = 56;
+    sldThreshold_.setBounds (20,         ky, kw, kw);
+    sldSmoothing_.setBounds (20 + kw+10, ky, kw, kw);
+    sldGain_     .setBounds (20+(kw+10)*2, ky, kw, kw);
+    lblThr_ .setBounds (20,           ky + kw,     kw, 14);
+    lblSmo_ .setBounds (20 + kw+10,   ky + kw,     kw, 14);
+    lblGain_.setBounds (20+(kw+10)*2, ky + kw,     kw, 14);
 }

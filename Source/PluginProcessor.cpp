@@ -1,251 +1,255 @@
 #include "PluginProcessor.h"
 #include "PluginEditor.h"
 
-// ─────────────────────────────────────────────────────────────────────────────
-juce::AudioProcessorValueTreeState::ParameterLayout
-TsengoVoiceSynthProcessor::createParameterLayout()
-{
-    std::vector<std::unique_ptr<juce::RangedAudioParameter>> params;
-
-    params.push_back (std::make_unique<juce::AudioParameterFloat> (
-        juce::ParameterID { "threshold", 1 }, "YIN Threshold",
-        juce::NormalisableRange<float> (0.05f, 0.40f, 0.01f), 0.12f));
-
-    params.push_back (std::make_unique<juce::AudioParameterFloat> (
-        juce::ParameterID { "volume", 1 }, "Volume",
-        juce::NormalisableRange<float> (0.0f, 1.0f, 0.01f), 0.8f));
-
-    params.push_back (std::make_unique<juce::AudioParameterFloat> (
-        juce::ParameterID { "attack", 1 }, "Attack (ms)",
-        juce::NormalisableRange<float> (5.0f, 200.0f, 1.0f), 25.0f));
-
-    params.push_back (std::make_unique<juce::AudioParameterFloat> (
-        juce::ParameterID { "release", 1 }, "Release (ms)",
-        juce::NormalisableRange<float> (50.0f, 2000.0f, 1.0f), 250.0f));
-
-    return { params.begin(), params.end() };
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-TsengoVoiceSynthProcessor::TsengoVoiceSynthProcessor()
+//==============================================================================
+TsengoProcessor::TsengoProcessor()
     : AudioProcessor (BusesProperties()
-        // Sidechain bus — user routes mic from FL Studio Mixer here
-        .withInput  ("Mic Sidechain", juce::AudioChannelSet::mono(), false)
-        // Stereo output — required by FL Studio Channel Rack instruments
-        .withOutput ("Output",        juce::AudioChannelSet::stereo(), true)),
-      apvts (*this, nullptr, "Parameters", createParameterLayout()),
-      yin_  (kYinBuf)
+        .withOutput ("Output", juce::AudioChannelSet::stereo(), true))
+{}
+
+TsengoProcessor::~TsengoProcessor()
 {
-    pThreshold = apvts.getRawParameterValue ("threshold");
-    pVolume    = apvts.getRawParameterValue ("volume");
-    pAttack    = apvts.getRawParameterValue ("attack");
-    pRelease   = apvts.getRawParameterValue ("release");
+    closeDevice();
 }
 
-TsengoVoiceSynthProcessor::~TsengoVoiceSynthProcessor() {}
-
-// ─────────────────────────────────────────────────────────────────────────────
-bool TsengoVoiceSynthProcessor::isBusesLayoutSupported (const BusesLayout& layouts) const
+//==============================================================================
+juce::StringArray TsengoProcessor::getInputDevices()
 {
-    // Output must be mono or stereo
-    const auto& outSet = layouts.getMainOutputChannelSet();
-    if (outSet != juce::AudioChannelSet::mono() &&
-        outSet != juce::AudioChannelSet::stereo())
-        return false;
-
-    // Sidechain: accept mono or disabled (FL Studio may not always enable it)
-    const auto& scSet = layouts.getChannelSet (true, 1);
-    if (!scSet.isDisabled() &&
-        scSet != juce::AudioChannelSet::mono() &&
-        scSet != juce::AudioChannelSet::stereo())
-        return false;
-
-    return true;
+    micMgr_.initialise (1, 0, nullptr, true);
+    auto* t = micMgr_.getCurrentDeviceTypeObject();
+    if (t) return t->getDeviceNames (true);
+    return {};
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-void TsengoVoiceSynthProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
+void TsengoProcessor::openDevice (const juce::String& name)
 {
-    yin_.prepare (static_cast<float> (sampleRate), kYinBuf);
-    currentNote_    = -1;
-    candidateNote_  = -1;
-    candidateCount_ = 0;
-    releaseCounter_ = 0;
-    juce::ignoreUnused (samplesPerBlock);
+    closeDevice();
+    micMgr_.initialise (1, 0, nullptr, true);
+
+    juce::AudioDeviceManager::AudioDeviceSetup s;
+    micMgr_.getAudioDeviceSetup (s);
+    s.inputDeviceName  = name;
+    s.outputDeviceName = "";
+    s.inputChannels    = 1;
+    s.outputChannels   = 0;
+    s.sampleRate       = sampleRate_;
+    s.bufferSize       = 512;
+    micMgr_.setAudioDeviceSetup (s, true);
+    micMgr_.addAudioCallback (this);
+    currentDevice_ = name;
+    deviceOpen_    = true;
 }
 
-void TsengoVoiceSynthProcessor::releaseResources()
+void TsengoProcessor::closeDevice()
 {
-    // Send noteOff for any hanging note
-    currentNote_   = -1;
-    candidateNote_ = -1;
+    if (deviceOpen_)
+    {
+        micMgr_.removeAudioCallback (this);
+        micMgr_.closeAudioDevice();
+        deviceOpen_ = false;
+    }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-int TsengoVoiceSynthProcessor::attackSamples() const noexcept
+//==============================================================================
+void TsengoProcessor::prepareToPlay (double sr, int)
 {
-    return static_cast<int> ((*pAttack / 1000.0f) * (float)getSampleRate());
+    sampleRate_ = sr;
+    medBuf_.clear();
+    ringWrite_ = 0;
 }
 
-int TsengoVoiceSynthProcessor::releaseSamples() const noexcept
+void TsengoProcessor::releaseResources()
 {
-    return static_cast<int> ((*pRelease / 1000.0f) * (float)getSampleRate());
+    closeDevice();
 }
 
-void TsengoVoiceSynthProcessor::emitNoteOn (int note, uint8_t velocity,
-                                             juce::MidiBuffer& midi, int offset)
+//==============================================================================
+// Mic callback — writes into ring buffer
+void TsengoProcessor::audioDeviceIOCallbackWithContext (
+    const float* const* in, int numIn,
+    float* const*, int,
+    int N,
+    const juce::AudioIODeviceCallbackContext&)
 {
-    midi.addEvent (juce::MidiMessage::noteOn (1, note, velocity), offset);
+    if (numIn < 1 || in[0] == nullptr) return;
+
+    int   wp  = ringWrite_.load();
+    float lv  = 0.f;
+
+    for (int i = 0; i < N; ++i)
+    {
+        float s      = in[0][i] * gain.load();
+        ring_[wp]    = s;
+        wp           = (wp + 1) & (RING - 1);
+        lv           = std::max (lv, std::abs (s));
+    }
+
+    ringWrite_.store (wp);
+    micLevel_.store (lv);
 }
 
-void TsengoVoiceSynthProcessor::emitNoteOff (int note,
-                                              juce::MidiBuffer& midi, int offset)
+//==============================================================================
+// Parabolic interpolation for sub-sample accuracy
+float TsengoProcessor::parabolicInterp (const juce::Array<float>& d, int tau)
 {
-    midi.addEvent (juce::MidiMessage::noteOff (1, note, (juce::uint8)0), offset);
+    if (tau <= 0 || tau >= d.size() - 1) return (float)tau;
+    float s0 = d[tau - 1], s1 = d[tau], s2 = d[tau + 1];
+    float denom = s0 - 2.f * s1 + s2;
+    if (std::abs (denom) < 1e-8f) return (float)tau;
+    return (float)tau + 0.5f * (s0 - s2) / denom;
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-void TsengoVoiceSynthProcessor::processBlock (juce::AudioBuffer<float>& buffer,
-                                               juce::MidiBuffer& midiMessages)
+//==============================================================================
+// YIN algorithm — haute précision
+float TsengoProcessor::yinDetect (const float* buf, int N, float sr)
+{
+    const int   W     = N / 2;
+    const float THR   = threshold.load();
+
+    juce::Array<float> d;
+    d.resize (W);
+
+    // Step 1: difference function
+    d.set (0, 0.f);
+    for (int tau = 1; tau < W; ++tau)
+    {
+        float sum = 0.f;
+        for (int j = 0; j < W; ++j)
+        {
+            float diff = buf[j] - buf[j + tau];
+            sum += diff * diff;
+        }
+        d.set (tau, sum);
+    }
+
+    // Step 2: cumulative mean normalised difference
+    juce::Array<float> dnorm;
+    dnorm.resize (W);
+    dnorm.set (0, 1.f);
+    float runSum = 0.f;
+    for (int tau = 1; tau < W; ++tau)
+    {
+        runSum += d[tau];
+        dnorm.set (tau, runSum > 0.f ? d[tau] * (float)tau / runSum : 1.f);
+    }
+
+    // Step 3: absolute threshold
+    int bestTau = -1;
+    for (int tau = 2; tau < W; ++tau)
+    {
+        if (dnorm[tau] < THR)
+        {
+            // Local minimum search
+            while (tau + 1 < W && dnorm[tau + 1] < dnorm[tau])
+                ++tau;
+            bestTau = tau;
+            confidence_.store (1.f - dnorm[tau]);
+            break;
+        }
+    }
+
+    if (bestTau < 2)
+    {
+        // Fallback: global minimum
+        bestTau = 2;
+        float minVal = dnorm[2];
+        for (int tau = 3; tau < W; ++tau)
+            if (dnorm[tau] < minVal) { minVal = dnorm[tau]; bestTau = tau; }
+        confidence_.store (std::max (0.f, 1.f - minVal));
+    }
+
+    // Step 4: parabolic interpolation
+    float tauF = parabolicInterp (dnorm, bestTau);
+    if (tauF < 1.f) return -1.f;
+
+    return sr / tauF;
+}
+
+//==============================================================================
+void TsengoProcessor::processBlock (juce::AudioBuffer<float>& buffer,
+                                     juce::MidiBuffer& midi)
 {
     juce::ScopedNoDenormals noDenormals;
+    buffer.clear();
 
-    // Clear incoming MIDI — we are the producer
-    midiMessages.clear();
+    const int N  = 2048;
+    const int wp = ringWrite_.load();
 
-    const int totalSamples = buffer.getNumSamples();
-    const int numOutputCh  = getTotalNumOutputChannels();
-
-    // ── Read audio from sidechain bus (mic input) ─────────────────────────
-    // FL Studio routes the mic track to our sidechain bus.
-    // Bus index 0 = main output, Bus index 1 = sidechain input.
-    const bool hasSidechain = getBusCount (true) > 0 &&
-                              !getBus (true, 0)->getCurrentLayout().isDisabled();
-
-    float inputPeak = 0.0f;
-    const float* micData = nullptr;
-
-    if (hasSidechain)
+    // Read N samples from ring buffer
+    float lv = micLevel_.load();
+    if (lv < threshold.load() * 0.5f)
     {
-        // Get the sidechain buffer using JUCE bus helper
-        auto scBuffer = getBusBuffer (buffer, true, 0);
-        if (scBuffer.getNumChannels() > 0 && scBuffer.getNumSamples() > 0)
+        // Silence — send noteOff if needed
+        if (lastMidiNote_ >= 0)
         {
-            micData   = scBuffer.getReadPointer (0);
-            inputPeak = scBuffer.getMagnitude (0, 0, scBuffer.getNumSamples());
+            midi.addEvent (juce::MidiMessage::noteOff (1, lastMidiNote_, (juce::uint8)0), 0);
+            lastMidiNote_ = -1;
+            currentNote_.store (-1);
         }
+        midiLevel_.store (0.f);
+        return;
     }
 
-    // Clear output (this is an instrument — it outputs silence unless pass-through)
-    for (int ch = 0; ch < numOutputCh; ++ch)
-        buffer.clear (ch, 0, totalSamples);
+    // Fill analysis window
+    for (int i = 0; i < N; ++i)
+        yinBuf_[i] = ring_[(wp - N + i + RING) & (RING - 1)];
 
-    // ── YIN pitch detection ───────────────────────────────────────────────
-    YinPitchDetector::Result result;
+    float hz = yinDetect (yinBuf_, N, (float)sampleRate_);
 
-    if (micData != nullptr && inputPeak > 0.001f)
+    // Median filter — stabilise pitch
+    medBuf_.push_back (hz);
+    if ((int)medBuf_.size() > MED) medBuf_.pop_front();
+
+    std::vector<float> sorted (medBuf_.begin(), medBuf_.end());
+    std::sort (sorted.begin(), sorted.end());
+    float medHz = sorted[sorted.size() / 2];
+
+    currentHz_.store (medHz);
+
+    // Hz → MIDI note
+    int note = -1;
+    if (medHz > 20.f && medHz < 5000.f)
     {
-        result = yin_.analyseBlock (micData, totalSamples);
+        float raw  = 69.f + 12.f * std::log2 (medHz / 440.f);
+        note       = juce::roundToInt (raw);
+        note       = juce::jlimit (0, 127, note);
     }
 
-    // Confidence threshold: correct direction (confidence >= 1 - threshold)
-    const float thresh = *pThreshold;
-    const bool  hasPitch = result.midiNote >= 0 &&
-                           result.confidence >= (1.0f - thresh);
-
-    const int detectedNote = hasPitch ? result.midiNote : -1;
-
-    // ── MIDI state machine ─────────────────────────────────────────────────
-    const int atkSamp = attackSamples();
-    const int relSamp = releaseSamples();
-
-    if (detectedNote < 0)
+    // Smoothing — hold to avoid flicker
+    if (note == lastMidiNote_)
     {
-        candidateNote_  = -1;
-        candidateCount_ = 0;
-
-        if (currentNote_ >= 0)
-        {
-            releaseCounter_ += totalSamples;
-            if (releaseCounter_ >= relSamp)
-            {
-                emitNoteOff (currentNote_, midiMessages, totalSamples - 1);
-                currentNote_    = -1;
-                releaseCounter_ = 0;
-            }
-        }
+        noteHoldCount_ = 0;
     }
     else
     {
-        releaseCounter_ = 0;
-
-        if (detectedNote == candidateNote_)
-            candidateCount_ += totalSamples;
-        else
-        {
-            candidateNote_  = detectedNote;
-            candidateCount_ = totalSamples;
-        }
-
-        if (candidateCount_ >= atkSamp)
-        {
-            if (currentNote_ != detectedNote)
-            {
-                // Dynamic velocity from input level (40–110)
-                const uint8_t vel = static_cast<uint8_t> (
-                    juce::jlimit (40, 110,
-                                  (int)(40.0f + inputPeak * 70.0f / 0.5f)));
-
-                if (currentNote_ >= 0)
-                    emitNoteOff (currentNote_, midiMessages, 0);
-
-                emitNoteOn (detectedNote, vel, midiMessages, 0);
-                currentNote_    = detectedNote;
-                candidateCount_ = 0;
-            }
-        }
+        ++noteHoldCount_;
+        if (noteHoldCount_ < HOLD_FRAMES)
+            note = lastMidiNote_; // keep old note
     }
 
-    // ── Update shared state for UI ─────────────────────────────────────────
+    // Send MIDI
+    if (note != lastMidiNote_)
     {
-        juce::SpinLock::ScopedLockType lock (stateLock_);
-        sharedState_.frequency    = result.frequency;
-        sharedState_.confidence   = result.confidence;
-        sharedState_.midiNote     = currentNote_;
-        sharedState_.midiCents    = result.midiCents;
-        sharedState_.inputLevel   = inputPeak;
-        sharedState_.micConnected = hasSidechain;
+        if (lastMidiNote_ >= 0)
+            midi.addEvent (juce::MidiMessage::noteOff (1, lastMidiNote_, (juce::uint8)0), 0);
+        if (note >= 0)
+            midi.addEvent (juce::MidiMessage::noteOn  (1, note, (juce::uint8)100), 0);
+
+        lastMidiNote_ = note;
+        currentNote_.store (note);
+        noteHoldCount_ = 0;
     }
+
+    midiLevel_.store (note >= 0 ? 1.f : 0.f);
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-TsengoVoiceSynthProcessor::DetectionState
-TsengoVoiceSynthProcessor::getDetectionState() const noexcept
+//==============================================================================
+juce::AudioProcessorEditor* TsengoProcessor::createEditor()
 {
-    juce::SpinLock::ScopedLockType lock (stateLock_);
-    return sharedState_;
-}
-
-juce::AudioProcessorEditor* TsengoVoiceSynthProcessor::createEditor()
-{
-    return new TsengoVoiceSynthEditor (*this);
-}
-
-void TsengoVoiceSynthProcessor::getStateInformation (juce::MemoryBlock& dest)
-{
-    auto state = apvts.copyState();
-    std::unique_ptr<juce::XmlElement> xml (state.createXml());
-    copyXmlToBinary (*xml, dest);
-}
-
-void TsengoVoiceSynthProcessor::setStateInformation (const void* data, int size)
-{
-    std::unique_ptr<juce::XmlElement> xml (getXmlFromBinary (data, size));
-    if (xml && xml->hasTagName (apvts.state.getType()))
-        apvts.replaceState (juce::ValueTree::fromXml (*xml));
+    return new TsengoEditor (*this);
 }
 
 juce::AudioProcessor* JUCE_CALLTYPE createPluginFilter()
 {
-    return new TsengoVoiceSynthProcessor();
+    return new TsengoProcessor();
 }
