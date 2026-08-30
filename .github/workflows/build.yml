@@ -11,8 +11,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Build DSP unit tests
-        run: cmake -B build-tests -DTSENGO_TESTS_ONLY=ON -DCMAKE_BUILD_TYPE=Release
+      - run: cmake -B build-tests -DTSENGO_TESTS_ONLY=ON -DCMAKE_BUILD_TYPE=Release
       - run: cmake --build build-tests --parallel 4
       - run: ctest --test-dir build-tests --output-on-failure
 
@@ -22,8 +21,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Show available Visual Studio
+        shell: bash
+        run: |
+          "/c/Program Files (x86)/Microsoft Visual Studio/Installer/vswhere.exe" -latest -products '*' || true
+
       - name: Configure
-        run: cmake -B build -G "Visual Studio 17 2022" -A x64
+        run: cmake -B build -DCMAKE_BUILD_TYPE=Release
 
       - name: Build
         run: cmake --build build --config Release --parallel 4
