@@ -1,0 +1,46 @@
+name: Build
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build DSP unit tests
+        run: cmake -B build-tests -DTSENGO_TESTS_ONLY=ON -DCMAKE_BUILD_TYPE=Release
+      - run: cmake --build build-tests --parallel 4
+      - run: ctest --test-dir build-tests --output-on-failure
+
+  windows:
+    needs: tests
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure
+        run: cmake -B build -G "Visual Studio 17 2022" -A x64
+
+      - name: Build
+        run: cmake --build build --config Release --parallel 4
+
+      - name: Collect artefacts
+        shell: bash
+        run: |
+          mkdir -p artifact
+          find build -name "*.vst3" -maxdepth 8 -print0 | while IFS= read -r -d '' p; do
+            echo "vst3: $p"; cp -r "$p" artifact/
+          done
+          find build -path "*Standalone*" -name "*.exe" -maxdepth 8 -print0 | while IFS= read -r -d '' p; do
+            echo "app: $p"; cp "$p" artifact/
+          done
+          ls -R artifact
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: TsengoVoice-Windows
+          path: artifact/
