@@ -36,10 +36,11 @@ jobs:
         shell: bash
         run: |
           mkdir -p artifact
-          find build -name "*.vst3" -maxdepth 8 -print0 | while IFS= read -r -d '' p; do
+          # -mindepth 4 skips the nested copy inside each bundle
+          find build -maxdepth 5 -name "*.vst3" -type d -print0 | while IFS= read -r -d '' p; do
             echo "vst3: $p"; cp -r "$p" artifact/
           done
-          find build -path "*Standalone*" -name "*.exe" -maxdepth 8 -print0 | while IFS= read -r -d '' p; do
+          find build -path "*Standalone*" -name "*.exe" -type f -print0 | while IFS= read -r -d '' p; do
             echo "app: $p"; cp "$p" artifact/
           done
           ls -R artifact
