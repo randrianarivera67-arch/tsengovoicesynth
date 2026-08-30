@@ -45,6 +45,20 @@ jobs:
           done
           ls -R artifact
 
+      - name: Build installer
+        shell: cmd
+        run: |
+          "%ProgramFiles(x86)%\Inno Setup 6\ISCC.exe" Installer\TsengoVoice.iss
+
+      - name: Show installer
+        shell: bash
+        run: ls -lh Output
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: TsengoVoice-Installer
+          path: Output/*.exe
+
       - uses: actions/upload-artifact@v4
         with:
           name: TsengoVoice-Windows
